@@ -31,6 +31,10 @@ xattr -cr "/Applications/SRV Mngr.app"
 Puis ouvre l'application. Une signature et une notarisation Apple nécessitent un compte Apple
 Developer ainsi que des certificats et secrets configurés dans GitHub Actions.
 
+Les releases macOS contiennent désormais les builds Intel (`x64`) et Apple Silicon (`arm64`).
+L'application vérifie automatiquement les mises à jour au démarrage et télécharge uniquement
+l'artefact correspondant à l'architecture du Mac.
+
 L'application **démarre vide** : on ajoute ses serveurs avec le bouton « + » de la barre latérale.
 Les identifiants sont chiffrés par le trousseau du système et rangés dans
 `~/Library/Application Support/srvmngr/hosts.json` (macOS), `%APPDATA%\srvmngr\hosts.json` (Windows),

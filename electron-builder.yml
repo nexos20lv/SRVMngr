@@ -13,6 +13,7 @@ files:
 # s'ajoutent depuis l'interface. Le fichier reste utilisable en développement seulement.
 mac:
   category: public.app-category.developer-tools
+  artifactName: SRV-Mngr-${version}-${arch}.${ext}
   target:
     - dmg
     - zip
