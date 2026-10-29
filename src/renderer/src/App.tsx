@@ -51,6 +51,11 @@ function Shell(): React.ReactNode {
           .filter((host) => statusesRef.current[host.id]?.status !== 'online')
           .map((host) => connectHost(host))
       )
+      const currentStatuses = await window.srv.ssh.statuses()
+      setStatuses((prev) => ({
+        ...prev,
+        ...Object.fromEntries(currentStatuses.map((status) => [status.id, status]))
+      }))
     },
     [connectHost]
   )
