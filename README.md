@@ -18,6 +18,19 @@ npm install
 npm run dev
 ```
 
+### Installeur macOS non signé
+
+Les releases macOS sont compilées, mais elles ne sont pas signées ni notarisées avec un certificat
+Apple Developer. macOS peut alors afficher « SRV Mngr est endommagé » après le téléchargement.
+Après avoir placé l'application dans `Applications`, ouvre Terminal et exécute :
+
+```bash
+xattr -cr "/Applications/SRV Mngr.app"
+```
+
+Puis ouvre l'application. Une signature et une notarisation Apple nécessitent un compte Apple
+Developer ainsi que des certificats et secrets configurés dans GitHub Actions.
+
 L'application **démarre vide** : on ajoute ses serveurs avec le bouton « + » de la barre latérale.
 Les identifiants sont chiffrés par le trousseau du système et rangés dans
 `~/Library/Application Support/srvmngr/hosts.json` (macOS), `%APPDATA%\srvmngr\hosts.json` (Windows),

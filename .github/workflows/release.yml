@@ -112,7 +112,12 @@ jobs:
           generate_release_notes: true
           files: artifacts/*
           body: |
-            Installeurs non signés : au premier lancement, clic droit → Ouvrir
-            (macOS) ou « Informations complémentaires → Exécuter quand même » (Windows).
+            macOS : les installeurs ne sont pas signés/notarisés avec un certificat Apple.
+            Si macOS affiche « SRV Mngr est endommagé », ouvre Terminal et exécute :
+            xattr -cr "/Applications/SRV Mngr.app"
+            Puis ouvre l'application. L'alternative est clic droit → Ouvrir.
+
+            Windows : « Informations complémentaires → Exécuter quand même » si SmartScreen
+            affiche un avertissement.
 
             Aucun identifiant n'est embarqué : les serveurs s'ajoutent dans l'application.
