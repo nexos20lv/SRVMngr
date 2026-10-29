@@ -32,10 +32,12 @@ function Shell(): React.ReactNode {
   const connectHost = useCallback(async (host: HostPublic) => {
     setStatuses((prev) => ({ ...prev, [host.id]: { id: host.id, status: 'connecting' } }))
     try {
-      await window.srv.ssh.connect(host.id)
+      const status = await window.srv.ssh.connect(host.id)
+      setStatuses((prev) => ({ ...prev, [host.id]: status }))
       await window.srv.metrics.start(host.id)
     } catch {
-      // l'événement de statut porte déjà le message d'erreur
+      const status = (await window.srv.ssh.statuses()).find((entry) => entry.id === host.id)
+      if (status) setStatuses((prev) => ({ ...prev, [host.id]: status }))
     }
   }, [])
 
@@ -63,6 +65,18 @@ function Shell(): React.ReactNode {
   useEffect(() => {
     void refreshHosts(true).finally(() => setBooted(true))
   }, [refreshHosts])
+
+  useEffect(() => {
+    if (!booted || hosts.length === 0) return
+    const timer = window.setInterval(() => {
+      const offlineHosts = hosts.filter((host) => {
+        const status = statusesRef.current[host.id]?.status
+        return status === undefined || status === 'offline' || status === 'error'
+      })
+      void Promise.all(offlineHosts.map((host) => connectHost(host)))
+    }, 15_000)
+    return () => window.clearInterval(timer)
+  }, [booted, connectHost, hosts])
 
   useEffect(() => {
     void window.srv.sync.session().then((session) => {
