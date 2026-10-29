@@ -38,9 +38,6 @@ linux:
   executableName: srvmngr
   synopsis: Gestionnaire de serveurs Linux par SSH
   description: Panneau de contrôle multi-serveurs avec SSH, Docker, systemd et nginx
-  desktop:
-    entryName: SRV Mngr
-    StartupWMClass: srvmngr
 publish:
   provider: github
   owner: nexos20lv
