@@ -18,9 +18,9 @@
     "smoke:tools": "tsx scripts/smoke-tools.mts",
     "smoke:security": "tsx scripts/smoke-security.mts",
     "smoke:security:apply": "tsx scripts/smoke-sec-apply.mts",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
