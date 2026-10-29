@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { ChevronRight, Cpu, HardDrive, MemoryStick, Plus, Power, Radio, Server, ShieldCheck, TerminalSquare } from 'lucide-react'
 import type { HostPublic, HostStatus, MetricsSnapshot, SysInfo } from '@shared/types'
 import type { SecurityAudit } from '@shared/security-types'
@@ -219,6 +219,18 @@ export function Fleet({ hosts, statuses, metrics, history, onOpen, onAdd }: Prop
   const [serviceAction, setServiceAction] = useState('restart')
   const [bulkResults, setBulkResults] = useState<Record<string, string> | null>(null)
   const [bulkRunning, setBulkRunning] = useState(false)
+  const [groupFilter, setGroupFilter] = useState('all')
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([])
+
+  const groups = useMemo(() => {
+    const grouped = new Map<string, HostPublic[]>()
+    for (const host of hosts) {
+      const group = host.group?.trim() || 'Sans groupe'
+      grouped.set(group, [...(grouped.get(group) ?? []), host])
+    }
+    return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b, 'fr'))
+  }, [hosts])
+  const visibleGroups = groupFilter === 'all' ? groups : groups.filter(([group]) => group === groupFilter)
 
   const online = hosts.filter((h) => statuses[h.id]?.status === 'online')
   const totalMem = online.reduce((sum, h) => sum + (metrics[h.id]?.mem.total ?? 0), 0)
@@ -336,16 +348,43 @@ export function Fleet({ hosts, statuses, metrics, history, onOpen, onAdd }: Prop
           </div>
 
           <div className="fleet-grid">
-            {hosts.map((host) => (
-              <HostCard
-                key={host.id}
-                host={host}
-                status={statuses[host.id]}
-                metrics={metrics[host.id]}
-                history={history[host.id] ?? []}
-                onOpen={() => onOpen(host.id)}
-              />
-            ))}
+            <div className="row row--between" style={{ gridColumn: '1 / -1' }}>
+              <div className="row">
+                <strong>Serveurs par groupe</strong>
+                <select className="input" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+                  <option value="all">Tous les groupes</option>
+                  {groups.map(([group]) => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </div>
+              <span className="hint">{groups.length} groupe(s)</span>
+            </div>
+            {visibleGroups.map(([group, groupHosts]) => {
+              const collapsed = collapsedGroups.includes(group)
+              return (
+                <div key={group} style={{ gridColumn: '1 / -1' }}>
+                  <button
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => setCollapsedGroups((previous) => collapsed ? previous.filter((item) => item !== group) : [...previous, group])}
+                  >
+                    {collapsed ? '▸' : '▾'} {group} · {groupHosts.length}
+                  </button>
+                  {!collapsed && (
+                    <div className="fleet-grid" style={{ marginTop: 8 }}>
+                      {groupHosts.map((host) => (
+                        <HostCard
+                          key={host.id}
+                          host={host}
+                          status={statuses[host.id]}
+                          metrics={metrics[host.id]}
+                          history={history[host.id] ?? []}
+                          onOpen={() => onOpen(host.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
           <FleetSecurity hosts={hosts} statuses={statuses} onOpen={onOpen} />
