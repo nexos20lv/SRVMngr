@@ -11,6 +11,12 @@ import { Sync } from '@/views/Sync'
 const HISTORY_SIZE = 60
 const SYNC_INTERVAL_MS = 30_000
 const STATUS_FAILURE_DELAY_MS = 8_000
+const STARTUP_CONNECT_ATTEMPTS = 3
+const STARTUP_CONNECT_RETRY_MS = 1_500
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
 
 function Shell(): React.ReactNode {
   const [hosts, setHosts] = useState<HostPublic[]>([])
@@ -48,10 +54,18 @@ function Shell(): React.ReactNode {
       const saved = await Promise.all(list.map(async (host) => [host.id, await window.srv.metrics.history(host.id)] as const))
       setHistory((prev) => ({ ...prev, ...Object.fromEntries(saved) }))
       if (!connectNew) return
+      const connectAtStartup = async (host: HostPublic): Promise<void> => {
+        for (let attempt = 1; attempt <= STARTUP_CONNECT_ATTEMPTS; attempt += 1) {
+          await connectHost(host)
+          const status = (await window.srv.ssh.statuses()).find((entry) => entry.id === host.id)
+          if (status?.status === 'online') return
+          if (attempt < STARTUP_CONNECT_ATTEMPTS) await wait(STARTUP_CONNECT_RETRY_MS)
+        }
+      }
       await Promise.all(
         list
           .filter((host) => statusesRef.current[host.id]?.status !== 'online')
-          .map((host) => connectHost(host))
+          .map((host) => connectAtStartup(host))
       )
       const currentStatuses = await window.srv.ssh.statuses()
       setStatuses((prev) => ({

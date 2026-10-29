@@ -213,7 +213,7 @@ export async function registerIpc({
 
   handle('ssh:connect', async (id: string) => {
     try {
-      await ssh.connect(id)
+      await ssh.connect(id, true)
       audit('ssh.connect', 'Connexion SSH', id)
       return ssh.statusOf(id)
     } catch (err) {
