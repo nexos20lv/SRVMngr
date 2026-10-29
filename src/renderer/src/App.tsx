@@ -10,6 +10,7 @@ import { Sync } from '@/views/Sync'
 
 const HISTORY_SIZE = 60
 const SYNC_INTERVAL_MS = 30_000
+const STATUS_FAILURE_DELAY_MS = 8_000
 
 function Shell(): React.ReactNode {
   const [hosts, setHosts] = useState<HostPublic[]>([])
@@ -25,6 +26,8 @@ function Shell(): React.ReactNode {
 
   const statusesRef = useRef(statuses)
   statusesRef.current = statuses
+  const pendingStatusTimers = useRef(new Map<string, number>())
+  const pendingStatuses = useRef(new Map<string, HostStatus>())
 
   const connectHost = useCallback(async (host: HostPublic) => {
     setStatuses((prev) => ({ ...prev, [host.id]: { id: host.id, status: 'connecting' } }))
@@ -86,6 +89,38 @@ function Shell(): React.ReactNode {
 
   useEffect(() => {
     const offStatus = window.srv.onStatus((status) => {
+      const current = statusesRef.current[status.id]
+      const timer = pendingStatusTimers.current.get(status.id)
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        pendingStatusTimers.current.delete(status.id)
+      }
+      pendingStatuses.current.delete(status.id)
+
+      if (status.status === 'online') {
+        setStatuses((prev) => ({ ...prev, [status.id]: status }))
+        return
+      }
+
+      if (current?.status === 'online' && status.status === 'connecting') return
+
+      if (
+        current?.status === 'online' &&
+        (status.status === 'offline' || status.status === 'error')
+      ) {
+        pendingStatuses.current.set(status.id, status)
+        const delayed = window.setTimeout(() => {
+          pendingStatusTimers.current.delete(status.id)
+          const pending = pendingStatuses.current.get(status.id)
+          if (pending) {
+            pendingStatuses.current.delete(status.id)
+            setStatuses((prev) => ({ ...prev, [status.id]: pending }))
+          }
+        }, STATUS_FAILURE_DELAY_MS)
+        pendingStatusTimers.current.set(status.id, delayed)
+        return
+      }
+
       setStatuses((prev) => ({ ...prev, [status.id]: status }))
     })
     const offMetrics = window.srv.metrics.onUpdate((hostId, snapshot) => {
@@ -109,6 +144,9 @@ function Shell(): React.ReactNode {
       offStatus()
       offMetrics()
       offErrors()
+      for (const timer of pendingStatusTimers.current.values()) window.clearTimeout(timer)
+      pendingStatusTimers.current.clear()
+      pendingStatuses.current.clear()
     }
   }, [])
 
