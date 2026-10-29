@@ -1,0 +1,32 @@
+appId: in.nxslab.srvmngr
+productName: SRV Mngr
+copyright: Pierre
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/node_modules/*/{CHANGELOG.md,README.md,test,__tests__,docs,example}'
+# Aucun hosts.seed.json n'est embarqué : l'application démarre vide et les serveurs
+# s'ajoutent depuis l'interface. Le fichier reste utilisable en développement seulement.
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  darkModeSupport: true
+win:
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+linux:
+  target:
+    - AppImage
+  category: Utility

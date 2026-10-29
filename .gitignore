@@ -1,0 +1,43 @@
+# Dépendances et sorties de build
+node_modules/
+out/
+dist/
+release/
+build/icon.iconset/
+*.tsbuildinfo
+coverage/
+
+# Artefacts d'installeur (à publier dans une GitHub Release, pas dans le dépôt)
+*.dmg
+*.zip
+*.blockmap
+*.AppImage
+*.snap
+*.exe
+*.msi
+*.nsis.7z
+
+# Secrets et données locales : jamais commités
+hosts.seed.json
+hosts.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Journaux et divers
+*.log
+_probe/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.local
+
+# Outils
+.freebuff/
+.vscode/
+.idea/
+*.swp

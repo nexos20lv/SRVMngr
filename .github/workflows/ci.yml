@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck et build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Vérifier les types
+        run: npm run typecheck
+
+      - name: Compiler
+        run: npm run build
+
+  package-check:
+    name: Packaging sans identifiants
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Construire l'app non signée
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm run build
+          npx electron-builder --mac --dir
+
+      # Garde-fou : aucun fichier d'identifiants ne doit se retrouver dans le bundle.
+      - name: Vérifier qu'aucun seed n'est embarqué
+        run: |
+          APP=$(find release -maxdepth 2 -name "*.app" | head -1)
+          echo "Bundle : $APP"
+          test -n "$APP" || { echo "::error::Aucun bundle produit"; exit 1; }
+          if find "$APP/Contents/Resources" -maxdepth 1 -name "*.seed.json" | grep -q .; then
+            echo "::error::Un fichier seed est présent dans le bundle : identifiants exposés !"
+            exit 1
+          fi
+          if grep -rl "hosts.seed.json" "$APP/Contents/Resources" >/dev/null 2>&1; then
+            echo "::warning::Le bundle contient encore une référence à hosts.seed.json"
+          fi
+          echo "Aucun seed embarqué."

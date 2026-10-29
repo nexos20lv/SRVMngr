@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+            artifacts: |
+              release/*.dmg
+              release/*-mac.zip
+          - os: windows-latest
+            script: dist:win
+            artifacts: |
+              release/*.exe
+          - os: ubuntu-latest
+            script: dist:linux
+            artifacts: |
+              release/*.AppImage
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      # Les builds ne sont pas signés : pas de certificat à chercher.
+      - name: Construire l'installeur
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run ${{ matrix.script }}
+
+      - name: Vérifier qu'aucun seed n'est embarqué
+        shell: bash
+        run: |
+          if find release -name "*.seed.json" | grep -q .; then
+            echo "::error::Un fichier seed se trouve dans les artefacts : identifiants exposés !"
+            exit 1
+          fi
+          echo "Artefacts propres."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srvmngr-${{ matrix.os }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publier la Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: SRV Mngr ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/*
+          body: |
+            Installeurs non signés : au premier lancement, clic droit → Ouvrir
+            (macOS) ou « Informations complémentaires → Exécuter quand même » (Windows).
+
+            Aucun identifiant n'est embarqué : les serveurs s'ajoutent dans l'application.
