@@ -37,6 +37,7 @@ export function TerminalView({ host, active }: { host: HostPublic; active: boole
   const [state, setState] = useState<'connecting' | 'ready' | 'closed' | 'error'>('connecting')
   const [error, setError] = useState<string | undefined>()
   const [latency, setLatency] = useState<number | undefined>()
+  const reconnectAttempts = useRef(0)
 
   useEffect(() => {
     const mount = mountRef.current
@@ -73,8 +74,18 @@ export function TerminalView({ host, active }: { host: HostPublic; active: boole
     const unsubscribeClose = window.srv.term.onClose((termId) => {
       if (termId !== termIdRef.current) return
       termIdRef.current = null
-      setState('closed')
-      term.writeln('\r\n\x1b[38;2;255;107;107m▸ Session terminée. Clique sur Reconnecter.\x1b[0m')
+      const attemptNumber = reconnectAttempts.current + 1
+      reconnectAttempts.current = attemptNumber
+      if (attemptNumber <= 3 && !disposed) {
+        setState('connecting')
+        term.writeln(`\r\n\x1b[38;2;255;194;71m▸ Session terminée. Reconnexion automatique ${attemptNumber}/3…\x1b[0m`)
+        window.setTimeout(() => {
+          if (!disposed) setAttempt((value) => value + 1)
+        }, 1500)
+      } else {
+        setState('closed')
+        term.writeln('\r\n\x1b[38;2;255;107;107m▸ Session terminée après 3 tentatives. Clique sur Reconnecter.\x1b[0m')
+      }
     })
     const inputDisposable = term.onData((data) => {
       if (termIdRef.current) window.srv.term.write(termIdRef.current, data)
@@ -89,6 +100,7 @@ export function TerminalView({ host, active }: { host: HostPublic; active: boole
           return
         }
         termIdRef.current = termId
+        reconnectAttempts.current = 0
         setLatency(Date.now() - started)
         setState('ready')
         term.focus()
