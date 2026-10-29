@@ -44,6 +44,11 @@ function Shell(): React.ReactNode {
     } catch {
       const status = (await window.srv.ssh.statuses()).find((entry) => entry.id === host.id)
       if (status) setStatuses((prev) => ({ ...prev, [host.id]: status }))
+      try {
+        await window.srv.metrics.start(host.id)
+      } catch (metricError) {
+        console.error(`[metrics] démarrage impossible pour ${host.name}:`, metricError)
+      }
     }
   }, [])
 
@@ -159,6 +164,19 @@ function Shell(): React.ReactNode {
       setStatuses((prev) => ({ ...prev, [status.id]: status }))
     })
     const offMetrics = window.srv.metrics.onUpdate((hostId, snapshot) => {
+      setStatuses((prev) => {
+        const current = prev[hostId]
+        if (current?.status === 'online') return prev
+        return {
+          ...prev,
+          [hostId]: {
+            id: hostId,
+            status: 'online',
+            latencyMs: current?.latencyMs,
+            since: current?.since ?? Date.now()
+          }
+        }
+      })
       setMetrics((prev) => ({ ...prev, [hostId]: snapshot }))
       setHistory((prev) => ({
         ...prev,
