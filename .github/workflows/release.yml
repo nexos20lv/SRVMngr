@@ -39,7 +39,7 @@ jobs:
             script: dist:mac
             artifacts: |
               release/*.dmg
-              release/*-mac.zip
+              release/*.zip
               release/*.blockmap
               release/*.yml
           - os: windows-latest
