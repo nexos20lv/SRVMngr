@@ -30,7 +30,14 @@ export function DockerView({ host }: { host: HostPublic }): ReactNode {
   const running = (docker.data?.containers ?? []).filter((c) => c.state === 'running').length
 
   const act = async (container: ContainerInfo, action: 'start' | 'stop' | 'restart' | 'rm'): Promise<void> => {
-    if (action === 'rm' && !window.confirm(`Supprimer définitivement le conteneur ${container.name} ?`)) return
+    if (action === 'rm') {
+      if (!window.confirm(`Supprimer définitivement le conteneur ${container.name} et ses données Docker ?`)) return
+      const typed = window.prompt(`Pour confirmer, saisis exactement le nom du conteneur : ${container.name}`)
+      if (typed !== container.name) {
+        if (typed !== null) notify('Suppression annulée : le nom ne correspond pas.', 'err')
+        return
+      }
+    }
     setBusy(`${container.name}:${action}`)
     try {
       const res = await window.srv.docker.action(host.id, container.name, action)

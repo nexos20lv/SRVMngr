@@ -153,6 +153,13 @@ export function FilesView({ host, initialPath }: { host: HostPublic; initialPath
 
   const remove = async (entry: FileEntry): Promise<void> => {
     if (!window.confirm(`Supprimer ${entry.path} ?${entry.type === 'dir' ? ' (récursif)' : ''}`)) return
+    if (root || entry.type === 'dir') {
+      const typed = window.prompt(`Pour confirmer, saisis exactement le chemin : ${entry.path}`)
+      if (typed !== entry.path) {
+        if (typed !== null) notify('Suppression annulée : le chemin ne correspond pas.', 'err')
+        return
+      }
+    }
     try {
       await window.srv.files.remove(host.id, entry.path, root)
       notify('Supprimé', 'ok')
