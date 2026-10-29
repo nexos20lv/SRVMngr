@@ -1,4 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { MetricsService } from './metrics-service'
@@ -18,6 +19,7 @@ const metrics = new MetricsService(ssh, () => mainWindow?.webContents ?? null)
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin'
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 940,
@@ -26,8 +28,8 @@ function createWindow(): void {
     show: false,
     backgroundColor: '#0a0d13',
     title: 'SRV Mngr',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    trafficLightPosition: { x: 14, y: 18 },
+    titleBarStyle: isMac ? 'hiddenInset' : 'default',
+    ...(isMac ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -61,7 +63,36 @@ function createWindow(): void {
   else void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+function startAutoUpdater(): void {
+  if (!app.isPackaged) return
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  const send = (status: { state: string; version?: string; percent?: number; error?: string }): void => {
+    mainWindow?.webContents.send('updater:status', status)
+  }
+  autoUpdater.on('checking-for-update', () => send({ state: 'checking' }))
+  autoUpdater.on('update-available', (info) => send({ state: 'available', version: info.version }))
+  autoUpdater.on('update-not-available', () => send({ state: 'current' }))
+  autoUpdater.on('download-progress', (progress) => send({ state: 'downloading', percent: progress.percent }))
+  autoUpdater.on('error', (error) => {
+    console.error('Mise à jour automatique impossible:', error)
+    send({ state: 'error', error: error.message })
+  })
+  autoUpdater.on('update-downloaded', () => {
+    console.info('Mise à jour téléchargée ; elle sera installée à la fermeture.')
+    send({ state: 'downloaded' })
+  })
+
+  setTimeout(() => {
+    void autoUpdater.checkForUpdates().catch((error: unknown) => {
+      console.error('Vérification des mises à jour impossible:', error)
+    })
+  }, 10_000)
+}
+
 app.setName('SRV Mngr')
+if (process.platform === 'win32') app.setAppUserModelId('in.nxslab.srvmngr')
 
 app.whenReady().then(async () => {
   ssh.onStatus((status) => {
@@ -71,6 +102,7 @@ app.whenReady().then(async () => {
   await registerIpc({ ssh, remote, metrics, sites, tools, security, getWindow: () => mainWindow })
 
   createWindow()
+  startAutoUpdater()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

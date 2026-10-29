@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Plus, Server } from 'lucide-react'
+import { AlertTriangle, Boxes, LogIn, Plus, Server } from 'lucide-react'
 import type { HostPublic, HostStatus, MetricsSnapshot } from '@shared/types'
 import { clamp } from '@/lib/hooks'
 
@@ -11,9 +11,12 @@ interface Props {
   onSelect: (id: string) => void
   onAdd: () => void
   onEdit: (host: HostPublic) => void
+  onAlerts: () => void
+  onSync: () => void
+  syncEmail?: string
 }
 
-export function Sidebar({ hosts, statuses, metrics, active, onSelect, onAdd, onEdit }: Props): ReactNode {
+export function Sidebar({ hosts, statuses, metrics, active, onSelect, onAdd, onEdit, onAlerts, onSync, syncEmail }: Props): ReactNode {
   const online = hosts.filter((h) => statuses[h.id]?.status === 'online').length
 
   return (
@@ -34,7 +37,10 @@ export function Sidebar({ hosts, statuses, metrics, active, onSelect, onAdd, onE
           <span className="nav-item__label">Vue d&apos;ensemble</span>
           <span className="tab__count">{hosts.length}</span>
         </button>
-
+        <button className={`nav-item ${active === 'alerts' ? 'nav-item--active' : ''}`} onClick={onAlerts}>
+          <AlertTriangle size={15} />
+          <span className="nav-item__label">Alertes</span>
+        </button>
         <div className="sidebar__label">
           <span>Serveurs</span>
           <button className="btn btn--icon" onClick={onAdd} title="Ajouter un serveur">
@@ -91,6 +97,13 @@ export function Sidebar({ hosts, statuses, metrics, active, onSelect, onAdd, onE
         </span>
         <span className="hint" style={{ marginLeft: 'auto' }}>double-clic : éditer</span>
       </div>
+      <button className="sidebar__account" onClick={onSync}>
+        <LogIn size={15} />
+        <span>
+          <strong>{syncEmail ?? 'Se connecter'}</strong>
+          <small>{syncEmail ? 'Compte synchronisé' : 'Synchroniser mes VPS'}</small>
+        </span>
+      </button>
     </aside>
   )
 }

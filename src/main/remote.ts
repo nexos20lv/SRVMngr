@@ -76,9 +76,24 @@ export class Remote {
       enable: `systemctl enable ${safeUnit}`,
       disable: `systemctl disable ${safeUnit}`
     }
+
     const command = map[action]
     if (!command) throw new Error(`Action non supportée: ${action}`)
     return this.ssh.exec(id, command, { sudo: true, timeoutMs: 90_000 })
+  }
+
+  serviceActionMany(ids: string[], unit: string, action: string): Promise<Record<string, ExecResult | { error: string }>> {
+    const safeUnit = unit.replace(/[^a-zA-Z0-9@._:-]/g, '')
+    if (!safeUnit) throw new Error('Service invalide')
+    if (!['start', 'stop', 'restart', 'reload', 'enable', 'disable'].includes(action)) {
+      throw new Error(`Action non supportée: ${action}`)
+    }
+    return this.ssh.execMany(ids, `systemctl ${action} ${safeUnit}`, { sudo: true, timeoutMs: 90_000 })
+  }
+
+  updateMany(ids: string[]): Promise<Record<string, ExecResult | { error: string }>> {
+    const command = 'if command -v apt-get >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y upgrade; elif command -v dnf >/dev/null 2>&1; then dnf -y upgrade; elif command -v yum >/dev/null 2>&1; then yum -y update; elif command -v apk >/dev/null 2>&1; then apk upgrade; else echo "Gestionnaire de paquets non supporté" >&2; exit 127; fi'
+    return this.ssh.execMany(ids, command, { sudo: true, timeoutMs: 15 * 60_000 })
   }
 
   journal(id: string, unit: string | null, lines = 300): Promise<string> {
@@ -140,21 +155,11 @@ export class Remote {
   }
 
   reboot(id: string): Promise<ExecResult> {
-    return this.ssh.exec(id, 'systemctl reboot', { sudo: true, timeoutMs: 15_000 }).catch((err) => ({
-      stdout: '',
-      stderr: String(err?.message ?? err),
-      code: 0,
-      durationMs: 0
-    }))
+    return this.ssh.exec(id, 'systemctl reboot', { sudo: true, timeoutMs: 15_000 })
   }
 
   shutdown(id: string): Promise<ExecResult> {
-    return this.ssh.exec(id, 'systemctl poweroff', { sudo: true, timeoutMs: 15_000 }).catch(() => ({
-      stdout: '',
-      stderr: '',
-      code: 0,
-      durationMs: 0
-    }))
+    return this.ssh.exec(id, 'systemctl poweroff', { sudo: true, timeoutMs: 15_000 })
   }
 
   /* ----------------------------------------------------------- fichiers */
@@ -192,8 +197,12 @@ export class Remote {
 
   async writeBase64(id: string, path: string, base64: string, root: boolean): Promise<void> {
     const tmp = `/tmp/srvmngr-${randomBytes(6).toString('hex')}`
-    await this.ssh.exec(id, `base64 -d > ${shQuote(tmp)}`, { stdin: base64, timeoutMs: 120_000 })
-    const res = await this.ssh.exec(id, `cat ${shQuote(tmp)} > ${shQuote(path)} && rm -f ${shQuote(tmp)}`, {
+    const staged = await this.ssh.exec(id, `set -e; trap 'rm -f ${shQuote(tmp)}' EXIT; base64 -d > ${shQuote(tmp)}`, {
+      stdin: base64,
+      timeoutMs: 120_000
+    })
+    if (staged.code !== 0) throw new Error(staged.stderr.trim() || 'Préparation du fichier impossible')
+    const res = await this.ssh.exec(id, `mv -f ${shQuote(tmp)} ${shQuote(path)}`, {
       sudo: root,
       timeoutMs: 120_000
     })

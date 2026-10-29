@@ -180,6 +180,8 @@ export const SYSINFO_COMMAND = [
   `echo '@@user'; whoami`,
   `echo '@@uid'; id -u`,
   `echo '@@virt'; (systemd-detect-virt 2>/dev/null || echo unknown)`,
+  `echo '@@init'; (ps -p 1 -o comm= 2>/dev/null || echo unknown)`,
+  `echo '@@pkg'; if command -v apt-get >/dev/null; then echo apt; elif command -v dnf >/dev/null; then echo dnf; elif command -v apk >/dev/null; then echo apk; elif command -v yum >/dev/null; then echo yum; else echo unknown; fi`,
   `echo '@@docker'; command -v docker >/dev/null && echo yes || echo no`,
   `echo '@@nginx'; command -v nginx >/dev/null && echo yes || echo no`,
   `echo '@@wings'; command -v wings >/dev/null && echo yes || echo no`,
@@ -218,7 +220,9 @@ export function parseSysInfo(out: string): Partial<SysInfo> {
     hasNginx: get('nginx') === 'yes',
     hasWings: get('wings') === 'yes',
     pterodactylNode: get('ptuuid') || undefined,
-    virtualization: get('virt') || undefined
+    virtualization: get('virt') || undefined,
+    initSystem: get('init') || undefined,
+    packageManager: get('pkg') || undefined
   }
 }
 

@@ -1,8 +1,8 @@
 import { app, safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { HostConfig, HostPublic } from '@shared/types'
+import type { AuditEntry, HostConfig, HostPublic, MetricsSnapshot } from '@shared/types'
 
 interface StoredFile {
   version: number
@@ -10,8 +10,87 @@ interface StoredFile {
   data: string
 }
 
+export interface SyncSession {
+  url: string
+  email: string
+  accountPassword: string
+  token: string
+  masterPassword: string
+}
+
 function hostsFile(): string {
   return join(app.getPath('userData'), 'hosts.json')
+}
+
+function localFile(name: string): string {
+  return join(app.getPath('userData'), name)
+}
+
+function readJson<T>(name: string, fallback: T): T {
+  try {
+    const file = localFile(name)
+    return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as T) : fallback
+  } catch (err) {
+    console.error(`[store] lecture ${name} impossible:`, err)
+    return fallback
+  }
+}
+
+function writeJson(name: string, value: unknown): void {
+  const file = localFile(name)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify(value), { mode: 0o600 })
+  chmodSync(file, 0o600)
+}
+
+export async function loadSyncSession(): Promise<SyncSession | null> {
+  const stored = readJson<StoredFile | null>('sync-session.json', null)
+  if (!stored) return null
+  try {
+    const json = stored.encrypted
+      ? (await safeStorage.isAsyncEncryptionAvailable()
+        ? (await safeStorage.decryptStringAsync(Buffer.from(stored.data, 'base64'))).result
+        : safeStorage.decryptString(Buffer.from(stored.data, 'base64')))
+      : stored.data
+    return JSON.parse(json) as SyncSession
+  } catch (err) {
+    console.error('[store] lecture sync-session.json impossible:', err)
+    return null
+  }
+}
+
+export async function saveSyncSession(session: SyncSession): Promise<void> {
+  const json = JSON.stringify(session)
+  let payload: StoredFile
+  if (await safeStorage.isAsyncEncryptionAvailable()) {
+    payload = { version: 1, encrypted: true, data: (await safeStorage.encryptStringAsync(json)).toString('base64') }
+  } else {
+    console.warn('[store] chiffrement OS indisponible : session sync stockée en clair')
+    payload = { version: 1, encrypted: false, data: json }
+  }
+  writeJson('sync-session.json', payload)
+}
+
+export function clearSyncSession(): void {
+  writeJson('sync-session.json', null)
+}
+
+export function loadMetricHistory(hostId: string): MetricsSnapshot[] {
+  return readJson<Record<string, MetricsSnapshot[]>>('metrics-history.json', {})[hostId] ?? []
+}
+
+export function saveMetricHistory(hostId: string, snapshots: MetricsSnapshot[]): void {
+  const all = readJson<Record<string, MetricsSnapshot[]>>('metrics-history.json', {})
+  all[hostId] = snapshots.slice(-480)
+  writeJson('metrics-history.json', all)
+}
+
+export function loadAudit(): AuditEntry[] {
+  return readJson<AuditEntry[]>('audit.json', [])
+}
+
+export function appendAudit(entry: AuditEntry): void {
+  writeJson('audit.json', [...loadAudit(), entry].slice(-1000))
 }
 
 export function toPublic(host: HostConfig): HostPublic {
@@ -26,7 +105,8 @@ export function toPublic(host: HostConfig): HostPublic {
     notes: host.notes,
     hasPassword: !!host.password,
     hasKey: !!host.privateKey,
-    hasSudo: !!host.sudoPassword
+    hasSudo: !!host.sudoPassword,
+    hostFingerprint: host.hostFingerprint
   }
 }
 
@@ -42,6 +122,7 @@ function normalize(raw: Partial<HostConfig>): HostConfig | null {
     privateKey: raw.privateKey || undefined,
     passphrase: raw.passphrase || undefined,
     sudoPassword: raw.sudoPassword || undefined,
+    hostFingerprint: raw.hostFingerprint?.trim() || undefined,
     group: raw.group || undefined,
     color: raw.color || undefined,
     notes: raw.notes || undefined
@@ -117,4 +198,5 @@ export async function saveHosts(hosts: HostConfig[]): Promise<void> {
     payload = { version: 1, encrypted: false, data: json }
   }
   writeFileSync(file, JSON.stringify(payload), { mode: 0o600 })
+  chmodSync(file, 0o600)
 }

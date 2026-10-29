@@ -97,6 +97,7 @@ export function HostView({ host, status, metrics, history, metricError, onEdit, 
   const [power, setPower] = useState<'reboot' | 'shutdown' | null>(null)
   const [powerBusy, setPowerBusy] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
+  const [refreshingMetrics, setRefreshingMetrics] = useState(false)
 
   useEffect(() => {
     if (tab === 'terminal') setTerminalMounted(true)
@@ -131,6 +132,15 @@ export function HostView({ host, status, metrics, history, metricError, onEdit, 
       notify(err instanceof Error ? err.message : String(err), 'err')
     } finally {
       setPowerBusy(false)
+    }
+  }
+
+  const refreshMetrics = async (): Promise<void> => {
+    setRefreshingMetrics(true)
+    try {
+      await window.srv.metrics.refresh(host.id)
+    } finally {
+      setRefreshingMetrics(false)
     }
   }
 
@@ -257,7 +267,15 @@ export function HostView({ host, status, metrics, history, metricError, onEdit, 
           </div>
         ) : (
           <>
-            {tab === 'overview' && <Overview host={host} metrics={metrics} history={history} />}
+            {tab === 'overview' && (
+              <Overview
+                host={host}
+                metrics={metrics}
+                history={history}
+                refreshing={refreshingMetrics}
+                onRefresh={() => void refreshMetrics()}
+              />
+            )}
             {tab === 'services' && <ServicesView host={host} />}
             {tab === 'docker' && <DockerView host={host} />}
             {tab === 'sites' && (

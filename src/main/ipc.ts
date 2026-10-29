@@ -1,15 +1,18 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
+import { homedir } from 'node:os'
 import type { HostConfig, HostPublic } from '@shared/types'
 import { MetricsService } from './metrics-service'
 import { Remote } from './remote'
 import { SecurityManager } from './security'
 import { SitesManager } from './sites'
-import { loadHosts, saveHosts, toPublic } from './store'
+import { appendAudit, clearSyncSession, loadAudit, loadHosts, loadSyncSession, saveHosts, saveSyncSession, toPublic } from './store'
 import type { SshManager } from './ssh-manager'
 import { ToolsManager } from './tools'
+import { changeSyncPassword, decryptVault, encryptVault, loginSyncUser, pullVault, pushVault, registerSyncUser, SyncUnauthorizedError, SyncVaultMissingError } from './sync'
 
 const MAX_UPLOAD = 96 * 1024 * 1024
 
@@ -54,10 +57,41 @@ export async function registerIpc({
 }: Deps): Promise<void> {
   let hosts: HostConfig[] = await loadHosts()
   hosts.forEach((host) => ssh.register(host))
+  const audit = (action: string, detail: string, hostId?: string, success = true): void => {
+    appendAudit({ id: randomUUID(), time: Date.now(), action, detail, hostId, ok: success })
+  }
+  ssh.onFingerprint((host, fingerprint) => {
+    void saveHosts(hosts).catch((err) => {
+      console.error('[ipc] sauvegarde de l empreinte SSH impossible:', err)
+    })
+    console.info(`[ssh] empreinte approuvée pour ${host.name}: ${fingerprint}`)
+  })
 
   /* ------------------------------------------------------------- hôtes */
 
   handle('hosts:list', () => hosts.map(toPublic))
+  handle('hosts:import-known-hosts', async () => {
+    const file = join(homedir(), '.ssh', 'known_hosts')
+    const content = await readFile(file, 'utf8')
+    let imported = 0
+    for (const line of content.split(/\r?\n/)) {
+      if (!line || line.startsWith('#')) continue
+      const parts = line.trim().split(/\s+/)
+      if (parts.length < 3 || parts[0].startsWith('|')) continue
+      const key = Buffer.from(parts[2], 'base64')
+      const fingerprint = `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`
+      for (const host of hosts) {
+        const aliases = parts[0].split(',')
+        const matches = aliases.some((alias) => alias === host.host || alias === `[${host.host}]:${host.port}`)
+        if (matches && host.hostFingerprint !== fingerprint) {
+          host.hostFingerprint = fingerprint
+          imported++
+        }
+      }
+    }
+    if (imported) await saveHosts(hosts)
+    return { imported }
+  })
 
   handle('hosts:save', async (input: Partial<HostConfig> & { id?: string }) => {
     const existing = input.id ? hosts.find((h) => h.id === input.id) : undefined
@@ -71,6 +105,7 @@ export async function registerIpc({
       privateKey: input.privateKey === undefined ? existing?.privateKey : input.privateKey || undefined,
       passphrase: input.passphrase === undefined ? existing?.passphrase : input.passphrase || undefined,
       sudoPassword: input.sudoPassword === undefined ? existing?.sudoPassword : input.sudoPassword || undefined,
+      hostFingerprint: input.hostFingerprint === undefined ? existing?.hostFingerprint : input.hostFingerprint || undefined,
       group: input.group ?? existing?.group,
       color: input.color ?? existing?.color,
       notes: input.notes ?? existing?.notes
@@ -97,11 +132,94 @@ export async function registerIpc({
     return true
   })
 
+  handle('sync:session', async () => {
+    const session = await loadSyncSession()
+    return session ? { email: session.email, url: session.url } : null
+  })
+  const saveAuthenticatedSession = async (url: string, email: string, accountPassword: string, token: string): Promise<string> => {
+    await saveSyncSession({ url, email, accountPassword, token, masterPassword: '' })
+    return token
+  }
+  handle('sync:register', async (url: string, email: string, password: string) => saveAuthenticatedSession(url, email, password, await registerSyncUser(url, email, password)))
+  handle('sync:login', async (url: string, email: string, password: string) => saveAuthenticatedSession(url, email, password, await loginSyncUser(url, email, password)))
+  handle('sync:change-password', async (password: string, newPassword: string) => {
+    const session = await loadSyncSession()
+    if (!session) throw new Error('Aucun compte connecté')
+    await changeSyncPassword(session.url, session.token, password, newPassword)
+    await saveSyncSession({ ...session, accountPassword: newPassword })
+    return true
+  })
+  handle('sync:logout', () => {
+    clearSyncSession()
+    return true
+  })
+  handle('sync:auto', async () => {
+    let session = await loadSyncSession()
+    if (!session || !session.masterPassword) return { synced: false }
+    try {
+      const sync = async (): Promise<{ hosts: HostConfig[]; missing: boolean }> => {
+        try {
+          return { hosts: decryptVault(await pullVault(session!), session!.masterPassword), missing: false }
+        } catch (err) {
+          if (err instanceof SyncVaultMissingError) return { hosts: [], missing: true }
+          throw err
+        }
+      }
+      let result: { hosts: HostConfig[]; missing: boolean }
+      try {
+        result = await sync()
+      } catch (err) {
+        if (!(err instanceof SyncUnauthorizedError) || !session.accountPassword) throw err
+        const token = await loginSyncUser(session.url, session.email, session.accountPassword)
+        session = { ...session, token }
+        await saveSyncSession(session)
+        result = await sync()
+      }
+      const imported = result.hosts
+      if (result.missing) {
+        await pushVault(session, encryptVault(hosts, session.masterPassword))
+        return { synced: true, count: hosts.length }
+      }
+      if (imported.some((host) => !host.id || !host.host || !host.username)) throw new Error('Le coffre contient un serveur invalide')
+      hosts = imported
+      await saveHosts(hosts)
+      ssh.disconnectAll()
+      hosts.forEach((host) => ssh.register(host))
+      await pushVault(session, encryptVault(hosts, session.masterPassword))
+      return { synced: true, count: hosts.length }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { synced: false, error: message }
+    }
+  })
+  handle('sync:push', async (url: string, token: string, password: string) => {
+    const session = await loadSyncSession()
+    await saveSyncSession({ url, email: session?.email ?? '', accountPassword: session?.accountPassword ?? '', token, masterPassword: password })
+    await pushVault({ url, token }, encryptVault(hosts, password))
+  })
+  handle('sync:pull', async (url: string, token: string, password: string) => {
+    const imported = decryptVault(await pullVault({ url, token }), password)
+    if (imported.some((host) => !host.id || !host.host || !host.username)) throw new Error('Le coffre contient un serveur invalide')
+    hosts = imported
+    await saveHosts(hosts)
+    const session = await loadSyncSession()
+    if (session) await saveSyncSession({ ...session, masterPassword: password })
+    ssh.disconnectAll()
+    hosts.forEach((host) => ssh.register(host))
+    return hosts.length
+  })
+
   /* --------------------------------------------------------------- ssh */
 
   handle('ssh:connect', async (id: string) => {
-    await ssh.connect(id, true)
-    return ssh.statusOf(id)
+    try {
+      await ssh.connect(id, true)
+      audit('ssh.connect', 'Connexion SSH', id)
+      return ssh.statusOf(id)
+    } catch (err) {
+      audit('ssh.connect', err instanceof Error ? err.message : String(err), id, false)
+      throw err
+    }
   })
 
   handle('ssh:disconnect', (id: string) => {
@@ -118,7 +236,8 @@ export async function registerIpc({
       username: (input.username ?? 'root').trim(),
       password: input.password || undefined,
       privateKey: input.privateKey || undefined,
-      passphrase: input.passphrase || undefined
+      passphrase: input.passphrase || undefined,
+      hostFingerprint: input.hostFingerprint || undefined
     }
     if (!candidate.host) throw new Error('Hôte manquant')
     return ssh.test(candidate)
@@ -127,7 +246,11 @@ export async function registerIpc({
   handle('ssh:status', (id: string) => ssh.statusOf(id))
   handle('ssh:statuses', () => hosts.map((h) => ssh.statusOf(h.id)))
 
-  handle('ssh:exec', (id: string, command: string, sudo = false) => ssh.exec(id, command, { sudo, timeoutMs: 120_000 }))
+  handle('ssh:exec', async (id: string, command: string, sudo = false) => {
+    const result = await ssh.exec(id, command, { sudo, timeoutMs: 120_000 })
+    audit(sudo ? 'ssh.sudo' : 'ssh.exec', command.slice(0, 240), id, result.code === 0)
+    return result
+  })
 
   handle('ssh:execMany', (ids: string[], command: string) => ssh.execMany(ids, command, { timeoutMs: 120_000 }))
 
@@ -139,6 +262,13 @@ export async function registerIpc({
     metrics.start(id)
     return true
   })
+  handle('metrics:refresh', (id: string) => {
+    metrics.refresh(id)
+    return true
+  })
+  handle('metrics:history', (id: string) => metrics.historyOf(id))
+
+  handle('audit:list', () => loadAudit())
 
   handle('metrics:stop', (id: string) => {
     metrics.stop(id)
@@ -149,7 +279,9 @@ export async function registerIpc({
 
   handle('services:list', (id: string) => remote.services(id))
   handle('services:action', (id: string, unit: string, action: string) => remote.serviceAction(id, unit, action))
+  handle('services:action-many', (ids: string[], unit: string, action: string) => remote.serviceActionMany(ids, unit, action))
   handle('services:journal', (id: string, unit: string | null, lines = 300) => remote.journal(id, unit, lines))
+  handle('system:update-many', (ids: string[]) => remote.updateMany(ids))
 
   /* ------------------------------------------------------------ docker */
 

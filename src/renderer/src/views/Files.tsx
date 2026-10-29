@@ -17,6 +17,26 @@ import type { FileEntry, HostPublic } from '@shared/types'
 import { Badge, Btn, Card, Empty, ErrorBox, Loading, Modal, useToast } from '@/components/ui'
 import { fmtBytes, fmtDate } from '@/lib/format'
 
+type DiffLine = { kind: 'same' | 'add' | 'remove'; text: string; number: number }
+
+function lineDiff(before: string, after: string): DiffLine[] {
+  const left = before.split(/\r?\n/)
+  const right = after.split(/\r?\n/)
+  const table = Array.from({ length: left.length + 1 }, () => Array<number>(right.length + 1).fill(0))
+  for (let i = left.length - 1; i >= 0; i--) {
+    for (let j = right.length - 1; j >= 0; j--) table[i][j] = left[i] === right[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1])
+  }
+  const result: DiffLine[] = []
+  let i = 0
+  let j = 0
+  while (i < left.length || j < right.length) {
+    if (i < left.length && j < right.length && left[i] === right[j]) result.push({ kind: 'same', text: left[i], number: j + 1 }), i++, j++
+    else if (j < right.length && (i === left.length || table[i][j + 1] >= table[i + 1][j])) result.push({ kind: 'add', text: right[j], number: j + 1 }), j++
+    else result.push({ kind: 'remove', text: left[i], number: i + 1 }), i++
+  }
+  return result
+}
+
 function joinPath(dir: string, name: string): string {
   return `${dir.replace(/\/+$/, '')}/${name}`
 }
@@ -35,9 +55,10 @@ export function FilesView({ host, initialPath }: { host: HostPublic; initialPath
   const [entries, setEntries] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | undefined>()
-  const [editing, setEditing] = useState<{ path: string; content: string; truncated: boolean; binary: boolean } | null>(null)
+  const [editing, setEditing] = useState<{ path: string; content: string; original: string; truncated: boolean; binary: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [showDiff, setShowDiff] = useState(false)
 
   useEffect(() => {
     if (initialPath) {
@@ -82,7 +103,8 @@ export function FilesView({ host, initialPath }: { host: HostPublic; initialPath
     setBusy(entry.path)
     try {
       const res = await window.srv.files.read(host.id, entry.path, root)
-      setEditing({ path: entry.path, content: res.content, truncated: res.truncated, binary: res.binary })
+      setEditing({ path: entry.path, content: res.content, original: res.content, truncated: res.truncated, binary: res.binary })
+      setShowDiff(false)
     } catch (err) {
       notify(err instanceof Error ? err.message : String(err), 'err')
     } finally {
@@ -283,6 +305,9 @@ export function FilesView({ host, initialPath }: { host: HostPublic; initialPath
             <Btn variant="primary" icon={<Save size={14} />} onClick={save} loading={saving} disabled={editing?.binary}>
               Enregistrer
             </Btn>
+            <Btn variant="ghost" onClick={() => setShowDiff((value) => !value)} disabled={!editing || editing.binary || editing.content === editing.original}>
+              {showDiff ? 'Éditeur' : 'Diff'}
+            </Btn>
           </>
         }
       >
@@ -300,12 +325,28 @@ export function FilesView({ host, initialPath }: { host: HostPublic; initialPath
                 <span>Le fichier dépasse 2 Mo : seule la première partie est éditable.</span>
               </div>
             )}
-            <textarea
-              className="editor"
-              value={editing?.content ?? ''}
-              onChange={(e) => setEditing((prev) => (prev ? { ...prev, content: e.target.value } : prev))}
-              spellCheck={false}
-            />
+            {showDiff ? (
+              <pre className="console" style={{ maxHeight: '60vh', overflow: 'auto' }}>
+                {lineDiff(editing?.original ?? '', editing?.content ?? '').map((line, index) => (
+                  <div key={`${index}-${line.kind}`} style={{ color: line.kind === 'add' ? 'var(--ok)' : line.kind === 'remove' ? 'var(--err)' : 'var(--muted)', background: line.kind === 'add' ? 'rgba(80,200,120,.08)' : line.kind === 'remove' ? 'rgba(240,80,80,.08)' : undefined }}>
+                    {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '} {String(line.number).padStart(4, ' ')} {line.text}
+                  </div>
+                ))}
+              </pre>
+            ) : (
+              <textarea
+                className="editor"
+                value={editing?.content ?? ''}
+                onChange={(e) => setEditing((prev) => (prev ? { ...prev, content: e.target.value } : prev))}
+                spellCheck={false}
+              />
+            )}
+            {editing && editing.content !== editing.original && (
+              <div className="hint" style={{ marginTop: 8 }}>
+                Modifications non enregistrées · {editing.content.length - editing.original.length >= 0 ? '+' : ''}
+                {editing.content.length - editing.original.length} caractères
+              </div>
+            )}
           </>
         )}
       </Modal>

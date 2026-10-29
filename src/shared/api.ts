@@ -55,18 +55,31 @@ export interface SrvApi {
   hosts: {
     list(): Promise<HostPublic[]>
     save(host: Partial<HostConfig> & { id?: string }): Promise<HostPublic>
+    importKnownHosts(): Promise<{ imported: number }>
     remove(id: string): Promise<boolean>
+  }
+  sync: {
+    session(): Promise<{ email: string; url: string } | null>
+    register(url: string, email: string, password: string): Promise<string>
+    login(url: string, email: string, password: string): Promise<string>
+    changePassword(password: string, newPassword: string): Promise<boolean>
+    logout(): Promise<boolean>
+    auto(): Promise<{ synced: boolean; count?: number; error?: string }>
+    push(url: string, token: string, masterPassword: string): Promise<void>
+    pull(url: string, token: string, masterPassword: string): Promise<number>
   }
   ssh: {
     connect(id: string): Promise<HostStatus>
     disconnect(id: string): Promise<boolean>
     statuses(): Promise<HostStatus[]>
-    test(host: Partial<HostConfig>): Promise<{ ok: boolean; latencyMs?: number; error?: string }>
+    test(host: Partial<HostConfig>): Promise<{ ok: boolean; latencyMs?: number; error?: string; fingerprint?: string }>
     exec(id: string, command: string, sudo?: boolean): Promise<ExecResult>
     execMany(ids: string[], command: string): Promise<Record<string, ExecResult | { error: string }>>
   }
   metrics: {
     start(id: string): Promise<boolean>
+    refresh(id: string): Promise<boolean>
+    history(id: string): Promise<MetricsSnapshot[]>
     stop(id: string): Promise<boolean>
     onUpdate(cb: (hostId: string, snapshot: MetricsSnapshot) => void): () => void
     onError(cb: (hostId: string, message: string) => void): () => void
@@ -75,6 +88,8 @@ export interface SrvApi {
   services: {
     list(id: string): Promise<ServiceInfo[]>
     action(id: string, unit: string, action: string): Promise<ExecResult>
+    actionMany(ids: string[], unit: string, action: string): Promise<Record<string, ExecResult | { error: string }>>
+    updateMany(ids: string[]): Promise<Record<string, ExecResult | { error: string }>>
     journal(id: string, unit: string | null, lines?: number): Promise<string>
   }
   docker: {
@@ -155,4 +170,10 @@ export interface SrvApi {
     onClose(cb: (termId: string) => void): () => void
   }
   onStatus(cb: (status: HostStatus) => void): () => void
+  audit: {
+    list(): Promise<import('./types').AuditEntry[]>
+  }
+  updater: {
+    onStatus(cb: (status: { state: string; version?: string; percent?: number; error?: string }) => void): () => void
+  }
 }

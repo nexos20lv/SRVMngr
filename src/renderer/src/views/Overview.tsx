@@ -14,13 +14,15 @@ import {
 } from 'lucide-react'
 import type { HostPublic, MetricsSnapshot, SysInfo } from '@shared/types'
 import { AreaChart, Badge, Card, Empty, ErrorBox, KpiCard, Loading, Meter } from '@/components/ui'
-import { useAsync } from '@/lib/hooks'
+import { useAsync, useTicker } from '@/lib/hooks'
 import { alertTone, fmtBytes, fmtPct, fmtRate, fmtUptime } from '@/lib/format'
 
 interface Props {
   host: HostPublic
   metrics?: MetricsSnapshot
   history: MetricsSnapshot[]
+  refreshing?: boolean
+  onRefresh?: () => void
 }
 
 function Series({ values, color }: { values: number[]; color: string }): ReactNode {
@@ -30,8 +32,10 @@ function Series({ values, color }: { values: number[]; color: string }): ReactNo
   return <AreaChart values={values} height={88} color={color} showScale />
 }
 
-export function Overview({ host, metrics, history }: Props): ReactNode {
+export function Overview({ host, metrics, history, refreshing = false, onRefresh }: Props): ReactNode {
   const info = useAsync<Partial<SysInfo>>(() => window.srv.sysInfo(host.id), [host.id])
+  const now = useTicker(Boolean(metrics), 1000)
+  void now
 
   const cpuHistory = history.map((m) => m.cpu)
   const ramHistory = history.map((m) => (m.mem.used / Math.max(1, m.mem.total)) * 100)
@@ -49,7 +53,21 @@ export function Overview({ host, metrics, history }: Props): ReactNode {
 
   return (
     <div className="stack">
-      {!metrics && <Loading label="Connexion et collecte des métriques…" />}
+      <div className="row row--between">
+        {!metrics ? <Loading label="Connexion et collecte des métriques…" /> : (
+          <span className="hint">
+            {Date.now() - metrics.time < 10_000
+              ? `Actualisé il y a ${Math.max(0, Math.round((Date.now() - metrics.time) / 1000))} s`
+              : `Dernière donnée il y a ${Math.round((Date.now() - metrics.time) / 1000)} s`}
+          </span>
+        )}
+        {onRefresh && (
+          <button className="btn btn--ghost btn--sm" onClick={onRefresh} disabled={refreshing} type="button">
+            <RefreshCw size={13} className={refreshing ? 'spin' : undefined} />
+            {refreshing ? 'Actualisation…' : 'Actualiser'}
+          </button>
+        )}
+      </div>
 
       {alerts.length > 0 && (
         <div className="stack" style={{ gap: 7 }}>
@@ -234,6 +252,8 @@ export function Overview({ host, metrics, history }: Props): ReactNode {
               <dd>{info.data?.timezone ?? '—'}</dd>
               <dt>Virtualisation</dt>
               <dd>{info.data?.virtualization ?? '—'}</dd>
+              <dt>Init / paquets</dt>
+              <dd>{[info.data?.initSystem, info.data?.packageManager].filter(Boolean).join(' · ') || '—'}</dd>
               <dt>Services</dt>
               <dd className="row" style={{ gap: 5 }}>
                 {info.data?.hasDocker && <Badge tone="accent">Docker</Badge>}

@@ -1,4 +1,5 @@
 import { Client, type ClientChannel, type ConnectConfig } from 'ssh2'
+import { createHash } from 'node:crypto'
 import type { ExecResult, HostConfig, HostStatus, SshStatus } from '@shared/types'
 import { stripSudoNoise, withSudo } from './shell'
 
@@ -30,6 +31,7 @@ export class SshManager {
   private pending = new Map<string, Promise<Connection>>()
   private listeners = new Set<StatusListener>()
   private shells = new Map<string, ClientChannel>()
+  private fingerprintListener: ((host: HostConfig, fingerprint: string) => void) | undefined
 
   register(host: HostConfig): void {
     this.hosts.set(host.id, host)
@@ -49,6 +51,13 @@ export class SshManager {
   onStatus(listener: StatusListener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  onFingerprint(listener: (host: HostConfig, fingerprint: string) => void): () => void {
+    this.fingerprintListener = listener
+    return () => {
+      if (this.fingerprintListener === listener) this.fingerprintListener = undefined
+    }
   }
 
   statusOf(id: string): HostStatus {
@@ -84,7 +93,7 @@ export class SshManager {
     this.emit(id)
   }
 
-  private buildConfig(host: HostConfig): ConnectConfig {
+  private buildConfig(host: HostConfig, observed?: { fingerprint?: string }): ConnectConfig {
     return {
       host: host.host,
       port: host.port || 22,
@@ -95,7 +104,14 @@ export class SshManager {
       readyTimeout: 20_000,
       keepaliveInterval: 20_000,
       keepaliveCountMax: 4,
-      algorithms: undefined
+      algorithms: undefined,
+      hostVerifier: (key: string | Buffer) => {
+        const normalized = typeof key === 'string' && key.startsWith('SHA256:')
+          ? key
+          : `SHA256:${createHash('sha256').update(typeof key === 'string' ? Buffer.from(key, 'hex') : key).digest('base64').replace(/=+$/, '')}`
+        if (observed) observed.fingerprint = normalized
+        return !host.hostFingerprint || host.hostFingerprint === normalized
+      }
     }
   }
 
@@ -104,11 +120,12 @@ export class SshManager {
   }
 
   /** Teste une configuration sans l'enregistrer (bouton « Tester »). */
-  test(host: HostConfig): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+  test(host: HostConfig): Promise<{ ok: boolean; latencyMs?: number; error?: string; fingerprint?: string }> {
     return new Promise((resolve) => {
       const client = new Client()
       const started = Date.now()
       let settled = false
+      const observed: { fingerprint?: string } = {}
       const finish = (result: { ok: boolean; latencyMs?: number; error?: string }): void => {
         if (settled) return
         settled = true
@@ -118,13 +135,13 @@ export class SshManager {
         } catch {
           /* ignore */
         }
-        resolve(result)
+        resolve({ ...result, fingerprint: observed.fingerprint })
       }
       const timer = setTimeout(() => finish({ ok: false, error: 'Délai dépassé (20 s)' }), 20_000)
       client
         .on('ready', () => finish({ ok: true, latencyMs: Date.now() - started }))
         .on('error', (err) => finish({ ok: false, error: err.message }))
-        .connect(this.buildConfig(host))
+        .connect(this.buildConfig(host, observed))
     })
   }
 
@@ -142,6 +159,7 @@ export class SshManager {
     this.connections.set(id, conn)
     this.emit(id)
 
+    const observed: { fingerprint?: string } = {}
     const promise = new Promise<Connection>((resolve, reject) => {
       const started = Date.now()
       let settled = false
@@ -157,7 +175,7 @@ export class SshManager {
         } catch {
           /* socket déjà fermé */
         }
-        reject(new Error(message))
+        reject(new Error(observed.fingerprint ? `${message} (empreinte: ${observed.fingerprint})` : message))
       }
 
       conn.client
@@ -168,6 +186,10 @@ export class SshManager {
           conn.error = undefined
           conn.latencyMs = Date.now() - started
           conn.since = Date.now()
+          if (!host.hostFingerprint && observed.fingerprint) {
+            host.hostFingerprint = observed.fingerprint
+            this.fingerprintListener?.(host, observed.fingerprint)
+          }
           this.pending.delete(id)
           this.emit(id)
           resolve(conn)
@@ -200,7 +222,7 @@ export class SshManager {
         })
 
       try {
-        conn.client.connect(this.buildConfig(host))
+        conn.client.connect(this.buildConfig(host, observed))
       } catch (err) {
         fail(err instanceof Error ? err.message : String(err))
       }
@@ -216,7 +238,6 @@ export class SshManager {
     if (!conn) return
     this.connections.delete(id)
     try {
-      conn.client.removeAllListeners()
       conn.client.end()
     } catch {
       /* ignore */
@@ -250,10 +271,7 @@ export class SshManager {
     const conn = await this.ensure(id)
     const host = this.getHost(id)
     const useSudo = options.sudo && host.username !== 'root' && !!host.sudoPassword
-    let finalCommand = useSudo ? withSudo(command, host.sudoPassword) : command
-    if (options.sudo && host.username !== 'root' && !host.sudoPassword) {
-      finalCommand = command
-    }
+    const finalCommand = useSudo ? withSudo(command) : command
     const started = Date.now()
 
     return new Promise<ExecResult>((resolve, reject) => {
@@ -277,32 +295,37 @@ export class SshManager {
       const timer = setTimeout(() => {
         if (done) return
         done = true
+        stream?.close()
         reject(new Error(`Timeout (${Math.round((options.timeoutMs ?? 60_000) / 1000)}s) : ${command.slice(0, 120)}`))
       }, options.timeoutMs ?? 60_000)
 
-      conn.client.exec(finalCommand, { env: { LANG: 'C', LC_ALL: 'C' } }, (err, stream) => {
+      let stream: ClientChannel | undefined
+      conn.client.exec(finalCommand, { env: { LANG: 'C', LC_ALL: 'C' } }, (err, channel) => {
         if (err) {
           done = true
           clearTimeout(timer)
           return reject(err)
         }
-        stream.on('data', (chunk: Buffer) => {
+        stream = channel
+        channel.on('data', (chunk: Buffer) => {
           if (stdout.length < MAX_OUTPUT) stdout += chunk.toString('utf8')
         })
-        stream.stderr.on('data', (chunk: Buffer) => {
+        channel.stderr.on('data', (chunk: Buffer) => {
           if (stderr.length < MAX_OUTPUT) stderr += chunk.toString('utf8')
         })
-        stream.on('exit', (code: number | null) => {
+        channel.on('exit', (code: number | null) => {
           exitCode = code ?? 0
         })
-        stream.on('close', () => finish(exitCode))
-        stream.on('error', (streamErr: Error) => {
+        channel.on('close', () => finish(exitCode))
+        channel.on('error', (streamErr: Error) => {
           done = true
           clearTimeout(timer)
           reject(streamErr)
         })
 
-        if (options.stdin !== undefined) stream.end(options.stdin)
+        if (useSudo) channel.write(`${host.sudoPassword}\n`)
+        if (options.stdin !== undefined) channel.end(options.stdin)
+        else if (useSudo) channel.end()
       })
     })
   }

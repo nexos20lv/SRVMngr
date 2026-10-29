@@ -5,8 +5,11 @@ import { Sidebar } from '@/components/Sidebar'
 import { ToastProvider } from '@/components/ui'
 import { Fleet } from '@/views/Fleet'
 import { HostView } from '@/views/HostView'
+import { Alerts } from '@/views/Alerts'
+import { Sync } from '@/views/Sync'
 
 const HISTORY_SIZE = 60
+const SYNC_INTERVAL_MS = 30_000
 
 function Shell(): React.ReactNode {
   const [hosts, setHosts] = useState<HostPublic[]>([])
@@ -17,6 +20,8 @@ function Shell(): React.ReactNode {
   const [activeId, setActiveId] = useState<string>('fleet')
   const [dialog, setDialog] = useState<{ open: boolean; host: HostPublic | null }>({ open: false, host: null })
   const [booted, setBooted] = useState(false)
+  const [update, setUpdate] = useState<{ state: string; version?: string; percent?: number; error?: string }>()
+  const [syncEmail, setSyncEmail] = useState<string>()
 
   const statusesRef = useRef(statuses)
   statusesRef.current = statuses
@@ -35,6 +40,8 @@ function Shell(): React.ReactNode {
     async (connectNew = true) => {
       const list = await window.srv.hosts.list()
       setHosts(list)
+      const saved = await Promise.all(list.map(async (host) => [host.id, await window.srv.metrics.history(host.id)] as const))
+      setHistory((prev) => ({ ...prev, ...Object.fromEntries(saved) }))
       if (!connectNew) return
       for (const host of list) {
         if (statusesRef.current[host.id]?.status !== 'online') await connectHost(host)
@@ -46,6 +53,36 @@ function Shell(): React.ReactNode {
   useEffect(() => {
     void refreshHosts(true).finally(() => setBooted(true))
   }, [refreshHosts])
+
+  useEffect(() => {
+    void window.srv.sync.session().then((session) => {
+      setSyncEmail(session?.email)
+    }).catch((err) => console.error('[sync] session automatique impossible:', err))
+  }, [])
+
+  useEffect(() => {
+    if (!syncEmail) return
+    let running = false
+    const syncNow = async (): Promise<void> => {
+      if (running) return
+      running = true
+      try {
+        const result = await window.srv.sync.auto()
+        if (result.synced) {
+          await refreshHosts(false)
+        } else if (result.error) {
+          console.error('[sync] synchronisation automatique impossible:', result.error)
+        }
+      } catch (err) {
+        console.error('[sync] synchronisation automatique impossible:', err)
+      } finally {
+        running = false
+      }
+    }
+    void syncNow()
+    const timer = window.setInterval(() => void syncNow(), SYNC_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [refreshHosts, syncEmail])
 
   useEffect(() => {
     const offStatus = window.srv.onStatus((status) => {
@@ -75,15 +112,17 @@ function Shell(): React.ReactNode {
     }
   }, [])
 
+  useEffect(() => window.srv.updater.onStatus(setUpdate), [])
+
   useEffect(() => {
-    if (activeId !== 'fleet' && !hosts.some((h) => h.id === activeId)) setActiveId('fleet')
+    if (!['fleet', 'alerts', 'sync'].includes(activeId) && !hosts.some((h) => h.id === activeId)) setActiveId('fleet')
   }, [hosts, activeId])
 
   const activeHost = hosts.find((h) => h.id === activeId)
 
   return (
-    <div className={`app ${window.srv.platform === 'darwin' ? 'is-mac' : ''}`}>
-      <Sidebar
+    <div className={`app ${window.srv.platform === 'darwin' ? 'is-mac' : ''} ${activeId === 'sync' ? 'app--sync' : ''}`}>
+      {activeId !== 'sync' && <Sidebar
         hosts={hosts}
         statuses={statuses}
         metrics={metrics}
@@ -91,10 +130,25 @@ function Shell(): React.ReactNode {
         onSelect={setActiveId}
         onAdd={() => setDialog({ open: true, host: null })}
         onEdit={(host) => setDialog({ open: true, host })}
-      />
+        onAlerts={() => setActiveId('alerts')}
+        onSync={() => setActiveId('sync')}
+        syncEmail={syncEmail}
+      />}
 
       <main className="main">
-        {activeHost ? (
+        {update && update.state !== 'current' && update.state !== 'checking' && (
+          <div className={`update-banner update-banner--${update.state}`}>
+            {update.state === 'available' && `Mise à jour ${update.version ?? ''} disponible…`}
+            {update.state === 'downloading' && `Téléchargement de la mise à jour : ${Math.round(update.percent ?? 0)} %`}
+            {update.state === 'downloaded' && 'Mise à jour prête : elle sera installée à la fermeture.'}
+            {update.state === 'error' && `Mise à jour impossible : ${update.error ?? 'erreur inconnue'}`}
+          </div>
+        )}
+        {activeId === 'alerts' ? (
+          <Alerts hosts={hosts} statuses={statuses} metrics={metrics} onOpen={setActiveId} />
+        ) : activeId === 'sync' ? (
+          <Sync onClose={() => setActiveId('fleet')} onSessionChange={setSyncEmail} />
+        ) : activeHost ? (
           <HostView
             key={activeHost.id}
             host={activeHost}

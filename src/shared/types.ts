@@ -14,6 +14,8 @@ export interface HostConfig {
   passphrase?: string
   /** Mot de passe sudo, utilisé si l'utilisateur n'est pas root. */
   sudoPassword?: string
+  /** Empreinte SHA256 de la clé hôte SSH approuvée. */
+  hostFingerprint?: string
   group?: string
   color?: string
   notes?: string
@@ -33,6 +35,7 @@ export interface HostPublic {
   hasPassword: boolean
   hasKey: boolean
   hasSudo: boolean
+  hostFingerprint?: string
 }
 
 export interface HostStatus {
@@ -89,6 +92,22 @@ export interface MetricsSnapshot {
   hostname?: string
 }
 
+export interface AuditEntry {
+  id: string
+  time: number
+  action: string
+  hostId?: string
+  detail: string
+  ok: boolean
+}
+
+export interface HostAlert {
+  hostId: string
+  severity: 'warn' | 'critical'
+  message: string
+  time: number
+}
+
 export interface SysInfo {
   hostname: string
   os: string
@@ -108,6 +127,8 @@ export interface SysInfo {
   hasWings: boolean
   pterodactylNode?: string
   virtualization?: string
+  initSystem?: string
+  packageManager?: string
 }
 
 export interface ServiceInfo {

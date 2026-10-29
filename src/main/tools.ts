@@ -80,7 +80,7 @@ export class ToolsManager {
     const tmp = `/tmp/srvmngr-q-${randomBytes(5).toString('hex')}.sql`
     await this.ssh.exec(id, `cat > ${shQuote(tmp)}`, { stdin: sql, timeoutMs: 20_000 })
     const started = Date.now()
-    const res = await this.ssh.exec(id, `${client} --batch ${target ?? ''} < ${shQuote(tmp)}; rm -f ${shQuote(tmp)}`, {
+    const res = await this.ssh.exec(id, `set -e; trap 'rm -f ${shQuote(tmp)}' EXIT; ${client} --batch ${target ?? ''} < ${shQuote(tmp)}`, {
       sudo: true,
       timeoutMs: 120_000
     })

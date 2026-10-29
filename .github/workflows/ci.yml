@@ -31,7 +31,50 @@ jobs:
       - name: Compiler
         run: npm run build
 
-  package-check:
+  package-check-platforms:
+    name: Packaging ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            script: dist:mac
+            pattern: 'release/*.dmg'
+          - name: Windows
+            os: windows-latest
+            script: dist:win
+            pattern: 'release/*.exe'
+          - name: Linux
+            os: ubuntu-latest
+            script: dist:linux
+            pattern: 'release/*.AppImage'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Construire l'artefact
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run ${{ matrix.script }}
+      - name: Vérifier l'artefact et l'absence de secrets
+        shell: bash
+        run: |
+          compgen -G "${{ matrix.pattern }}" > /dev/null || {
+            echo "::error::Artefact attendu absent: ${{ matrix.pattern }}"
+            exit 1
+          }
+          if find release -name "*.seed.json" | grep -q .; then
+            echo "::error::Un fichier seed est présent dans les artefacts."
+            exit 1
+          fi
+
+  package-check-macos:
     name: Packaging sans identifiants
     runs-on: macos-latest
     steps:

@@ -5,6 +5,9 @@ métriques temps réel, services systemd, Docker, sites nginx, processus, explor
 journaux et terminal SSH interactif.
 
 Aucun agent à installer côté serveur : tout passe par SSH (et sudo quand c'est nécessaire).
+L'application desktop fonctionne sur macOS, Windows et Linux. Les fonctions Services, Docker, nginx,
+sécurité et maintenance supposent en revanche que les machines administrées à distance sont des
+serveurs Linux disposant de SSH et des outils concernés.
 
 ---
 
@@ -106,6 +109,8 @@ Chaque serveur accepte :
   (Docker, `systemctl start/stop`, nginx, fichiers système). Le mot de passe est passé via `stdin`
   (`sudo -S`), il n'apparaît donc jamais dans `ps`.
 - un bouton **Tester la connexion** avant d'enregistrer.
+- À la première connexion, une empreinte SHA256 de clé hôte SSH absente est approuvée une seule fois
+  (TOFU) puis enregistrée. Une empreinte qui change bloque ensuite la connexion jusqu'à correction manuelle.
 
 Stockage : `hosts.json` chiffré par `safeStorage` (trousseau macOS / DPAPI Windows / libsecret Linux),
 permissions `0600`. Le renderer n'a jamais accès aux secrets : il ne reçoit que des indicateurs
@@ -131,17 +136,36 @@ Les binaires ne sont pas signés : au premier lancement macOS demandera *Clic dr
 - **`.github/workflows/ci.yml`** — sur chaque push / pull request : `npm ci`, `npm run typecheck`,
   `npm run build`, puis un packaging macOS non signé (`--dir`) qui **échoue si un fichier `*.seed.json`
   se trouve dans le bundle**. C'est le garde-fou contre une fuite d'identifiants.
-- **`.github/workflows/release.yml`** — sur un tag `v*` : build des trois plateformes (dmg/zip macOS,
-  NSIS + portable Windows, AppImage Linux), vérification anti-seed des artefacts, puis publication
-  automatique dans la GitHub Release avec notes générées :
+- **`.github/workflows/release.yml`** — sur chaque push sur `main` : build des trois plateformes
+  (dmg/zip macOS, NSIS + portable Windows, AppImage Linux), vérification anti-seed des artefacts,
+  puis publication automatique dans une GitHub Release avec une version semver et des notes générées.
+  Les métadonnées `latest*.yml` sont publiées avec les installeurs pour `electron-updater` :
 
   ```bash
-  git tag v1.0.0 && git push origin v1.0.0
+  git push origin main
   ```
 
   Les installeurs sont des artefacts de Release, jamais des fichiers du dépôt (`*.dmg`, `*.zip`,
   `*.exe`, `*.AppImage` sont dans `.gitignore`). Le runner `macos-latest` produit un binaire arm64 ;
   pour un Mac Intel, ajoute un job `macos-13` dans la matrice.
+- La CI vérifie aussi le packaging natif sur les runners macOS, Windows et Linux. Les releases sont
+  sérialisées pour éviter deux publications concurrentes. La signature Apple/Windows reste à configurer
+  avec les secrets du fournisseur avant une distribution publique.
+- L'application vérifie automatiquement les mises à jour 10 secondes après son démarrage lorsqu'elle
+  est installée. Une mise à jour téléchargée est installée à la fermeture suivante. Les builds macOS
+  non signés ne peuvent toutefois pas bénéficier d'une mise à jour silencieuse fiable : il faut
+  configurer la signature Apple (`CSC_LINK`, `CSC_KEY_PASSWORD`, notarisation) pour la production.
+  Sous Windows, utilise l'installeur **NSIS** pour l'auto-update ; la version portable est pratique
+  pour un lancement ponctuel, mais ne s'installe pas et ne se met pas à jour automatiquement.
+  Sous Linux, l'AppImage est le format pris en charge par l'auto-update.
+- Sous Linux, l'AppImage ne nécessite pas d'installation : rends-la exécutable avec
+  `chmod +x SRV-Mngr-*.AppImage`, puis lance-la. Le lanceur desktop est fourni par Electron Builder ;
+  le trousseau système Linux doit fournir `libsecret` pour chiffrer les identifiants. Si aucun trousseau
+  n'est disponible, l'application affiche un avertissement et utilise son repli existant.
+- Sous Windows, l'application utilise les chemins et le stockage utilisateur gérés par Electron
+  (`%APPDATA%`), le trousseau système Windows pour chiffrer les hôtes, un identifiant de notification
+  Windows dédié et un installeur NSIS par utilisateur (aucun droit administrateur requis). Les actions
+  SSH, Docker, nginx et systemd restent des actions effectuées sur les serveurs distants Linux.
 
 ## 5. Architecture
 
@@ -155,7 +179,7 @@ src/
 │   ├── sites.ts       gestion nginx : lecture, création, édition, activation, SSL
 │   ├── tools.ts       bases de données, certificats, fail2ban, cron, ports, maintenance
 │   ├── remote.ts      opérations métier (services, docker, fichiers, nginx…)
-│   ├── metrics-service.ts  polling 3 s + diffusion au renderer
+│   ├── metrics-service.ts  polling 3 s + diffusion au renderer + alertes desktop
 │   ├── store.ts       persistance chiffrée des hôtes
 │   └── ipc.ts         handlers typés, retour { ok, data } / { ok, error }
 ├── preload/           contextBridge : API `window.srv` minimale
@@ -168,8 +192,72 @@ Choix techniques :
 - **Une seule commande par échantillon** de métriques (lecture de `/proc`, `df`, `ps`) : ~10 ms de CPU
   par serveur toutes les 3 s.
 - Calcul du CPU par delta de `/proc/stat`, débit réseau par delta de `/proc/net/dev`.
-- Après **3 échecs consécutifs**, le polling s'arrête pour ne pas marteler SSH (fail2ban côté serveur) ;
-  l'UI propose alors « Reconnecter ».
+- Après **3 échecs consécutifs**, le polling passe en reprise progressive (jusqu'à 30 s) pour ne pas
+  marteler SSH (fail2ban côté serveur). Les dernières métriques valides restent affichées et l'onglet
+  Vue d'ensemble propose un rafraîchissement manuel.
+- Les données affichent leur âge. Une notification desktop est envoyée lorsqu'un serveur dépasse un seuil
+  critique (CPU 95 %, RAM 95 % ou disque 95 %), une seule fois par incident.
+- L'historique des métriques est conservé localement (jusqu'à 480 échantillons par serveur) et la page
+  **Alertes** regroupe les VPS hors ligne ou proches des seuils CPU/RAM/disque.
+- Le bouton **Importer known_hosts** récupère les empreintes de `~/.ssh/known_hosts` pour les serveurs
+  correspondant à l'adresse et au port configurés.
+- Les connexions et commandes SSH sont journalisées localement dans `audit.json`, sans mots de passe.
+- La vue flotte permet les actions groupées sur un service systemd (start, stop, restart, reload,
+  enable, disable) ainsi que les mises à jour système adaptées à `apt`, `dnf`, `yum` ou `apk`.
+  Chaque VPS retourne son propre résultat.
+- L'éditeur de fichiers propose un diff ligne par ligne avant l'enregistrement, avec ajouts et
+  suppressions colorés.
+
+### Synchroniser les VPS entre plusieurs PC
+
+SRV Mngr utilise un coffre portable chiffré côté client. Le serveur Node.js ne reçoit jamais le mot
+de passe maître ni les identifiants en clair : il stocke uniquement le blob AES-256-GCM chiffré.
+Chaque utilisateur possède un compte et un coffre séparé.
+
+Le serveur central s'appelle `sync-server` :
+
+Le dossier autonome [sync-server](./sync-server/) contient `package.json`, `index.js` et un modèle
+`.env.example`. Copie ce modèle vers `.env`, puis adapte les valeurs :
+
+```bash
+cd sync-server
+cp .env.example .env
+```
+
+Les personnes qui veulent l'auto-héberger peuvent utiliser ce dossier avec leur hébergeur Node.js
+de leur choix.
+
+Dans l'application, ouvre **Synchroniser**, saisis l'URL HTTPS, crée un compte avec un email et un
+mot de passe d'au moins 10 caractères, puis choisis un mot de passe maître d'au moins 10 caractères.
+Utilise **Envoyer** sur le premier PC puis **Récupérer** sur les autres avec le même compte.
+Quand tous les comptes sont créés, passe `SYNC_ALLOW_REGISTRATION=false` pour fermer les inscriptions.
+Après la première synchronisation, la session est conservée dans le trousseau sécurisé du système :
+l'application récupère puis republie automatiquement le coffre au lancement. Le compte peut être
+géré depuis le bouton situé en bas de la barre latérale (modification du mot de passe ou déconnexion).
+
+Configuration du serveur dans `sync-server/.env` :
+
+```env
+SYNC_PORT=8787
+SYNC_DATA=./data
+SYNC_ALLOW_REGISTRATION=true
+```
+
+Commande :
+
+```bash
+cd sync-server
+npm start
+```
+
+Le fichier `.env` est chargé automatiquement au démarrage. Les variables déjà définies par
+l'hébergeur restent prioritaires. Le fichier `.env` ne doit jamais être publié : il est déjà ignoré
+par Git.
+
+En ouvrant l'URL du serveur dans un navigateur, tu obtiens aussi une interface web pour créer un
+compte, te connecter et modifier le mot de passe. Le coffre n'est pas affiché dans cette interface :
+il reste chiffré côté client. Expose le port derrière HTTPS. Après la création des comptes autorisés, passe
+`SYNC_ALLOW_REGISTRATION=false`.
 - `contextIsolation: true`, `nodeIntegration: false`, navigation externe bloquée, CSP locale.
 
 ## 6. Dépannage
@@ -186,6 +274,7 @@ Choix techniques :
 
 ```bash
 npm run typecheck    # TS main + renderer
+npm test             # tests hors réseau des parseurs et du quoting shell
 npm run build        # bundle production
 npm run smoke        # connexion réelle + métriques/services/docker/nginx/fichiers (lit hosts.seed.json)
 npm run smoke:tools  # sites (création/édition/suppression) + bases de données + certs + fail2ban + cron + ports

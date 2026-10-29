@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronRight, Cpu, HardDrive, MemoryStick, Plus, Radio, Server, ShieldCheck, TerminalSquare } from 'lucide-react'
+import { ChevronRight, Cpu, HardDrive, MemoryStick, Plus, Power, Radio, Server, ShieldCheck, TerminalSquare } from 'lucide-react'
 import type { HostPublic, HostStatus, MetricsSnapshot, SysInfo } from '@shared/types'
 import type { SecurityAudit } from '@shared/security-types'
 import { AreaChart, Badge, Btn, Card, Empty, KpiCard, Ring, StatusDot, useToast } from '@/components/ui'
@@ -215,6 +215,10 @@ export function Fleet({ hosts, statuses, metrics, history, onOpen, onAdd }: Prop
   const [command, setCommand] = useState('uptime')
   const [running, setRunning] = useState(false)
   const [results, setResults] = useState<Record<string, string> | null>(null)
+  const [service, setService] = useState('nginx')
+  const [serviceAction, setServiceAction] = useState('restart')
+  const [bulkResults, setBulkResults] = useState<Record<string, string> | null>(null)
+  const [bulkRunning, setBulkRunning] = useState(false)
 
   const online = hosts.filter((h) => statuses[h.id]?.status === 'online')
   const totalMem = online.reduce((sum, h) => sum + (metrics[h.id]?.mem.total ?? 0), 0)
@@ -240,11 +244,49 @@ export function Fleet({ hosts, statuses, metrics, history, onOpen, onAdd }: Prop
             : `$ ${command}\n${entry.stdout}${entry.stderr ? `\n${entry.stderr}` : ''}`
           : '—'
       }
+
       setResults(mapped)
     } catch (err) {
       notify(err instanceof Error ? err.message : String(err), 'err')
     } finally {
       setRunning(false)
+    }
+
+  }
+
+  const formatResults = (res: Record<string, { stdout?: string; stderr?: string; code?: number } | { error: string }>): Record<string, string> => {
+    const mapped: Record<string, string> = {}
+    for (const host of hosts) {
+      const entry = res[host.id]
+      mapped[host.id] = !entry ? '—' : 'error' in entry
+        ? `✖ ${entry.error}`
+        : `${entry.code === 0 ? '✓' : '✖'}\n${entry.stdout ?? ''}${entry.stderr ? `\n${entry.stderr}` : ''}`
+    }
+    return mapped
+  }
+
+  const runServiceAction = async (): Promise<void> => {
+    if (!service.trim()) return
+    setBulkRunning(true)
+    try {
+      const res = await window.srv.services.actionMany(hosts.map((host) => host.id), service.trim(), serviceAction)
+      setBulkResults(formatResults(res))
+    } catch (err) {
+      notify(err instanceof Error ? err.message : String(err), 'err')
+    } finally {
+      setBulkRunning(false)
+    }
+  }
+
+  const runUpdates = async (): Promise<void> => {
+    if (!window.confirm(`Lancer les mises à jour système sur ${hosts.length} serveur(s) ?`)) return
+    setBulkRunning(true)
+    try {
+      setBulkResults(formatResults(await window.srv.services.updateMany(hosts.map((host) => host.id))))
+    } catch (err) {
+      notify(err instanceof Error ? err.message : String(err), 'err')
+    } finally {
+      setBulkRunning(false)
     }
   }
 
@@ -308,6 +350,18 @@ export function Fleet({ hosts, statuses, metrics, history, onOpen, onAdd }: Prop
 
           <FleetSecurity hosts={hosts} statuses={statuses} onOpen={onOpen} />
 
+          <Card title="Actions groupées" icon={<Power size={14} />} subtitle="avec sudo, résultat séparé par serveur"
+            actions={<Btn variant="primary" size="sm" onClick={() => void runServiceAction()} loading={bulkRunning} disabled={!service.trim()}>Appliquer</Btn>}>
+            <div className="row">
+              <input className="input mono" value={service} onChange={(e) => setService(e.target.value)} placeholder="nginx.service" />
+              <select className="input" value={serviceAction} onChange={(e) => setServiceAction(e.target.value)}>
+                {['restart', 'start', 'stop', 'reload', 'enable', 'disable'].map((action) => <option key={action} value={action}>{action}</option>)}
+              </select>
+              <Btn variant="ghost" size="sm" onClick={() => void runUpdates()} loading={bulkRunning}>Mettre à jour les systèmes</Btn>
+            </div>
+            {bulkResults && <BulkResults hosts={hosts} results={bulkResults} statuses={statuses} />}
+          </Card>
+
           <Card
             title="Commande sur toute la flotte"
             icon={<TerminalSquare size={14} />}
@@ -351,4 +405,13 @@ export function Fleet({ hosts, statuses, metrics, history, onOpen, onAdd }: Prop
       )}
     </div>
   )
+}
+
+function BulkResults({ hosts, results, statuses }: { hosts: HostPublic[]; results: Record<string, string>; statuses: Record<string, HostStatus> }): ReactNode {
+  return <div className="stack" style={{ marginTop: 12, gap: 10 }}>
+    {hosts.map((host) => <div key={host.id}>
+      <div className="row" style={{ marginBottom: 4 }}><StatusDot status={statuses[host.id]?.status ?? 'offline'} /><strong>{host.name}</strong></div>
+      <pre className="console" style={{ maxHeight: 160 }}>{results[host.id]}</pre>
+    </div>)}
+  </div>
 }

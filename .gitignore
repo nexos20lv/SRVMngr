@@ -6,6 +6,7 @@ release/
 build/icon.iconset/
 *.tsbuildinfo
 coverage/
+data/
 
 # Artefacts d'installeur (à publier dans une GitHub Release, pas dans le dépôt)
 *.dmg
@@ -35,9 +36,11 @@ _probe/
 Thumbs.db
 desktop.ini
 *.local
+.tmp
 
 # Outils
 .freebuff/
 .vscode/
 .idea/
 *.swp
+RAPPORT-VPS.md

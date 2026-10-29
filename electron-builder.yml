@@ -21,12 +21,28 @@ win:
   target:
     - nsis
     - portable
+  artifactName: ${name}-${version}-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SRV Mngr
 linux:
   target:
     - AppImage
   category: Utility
+  artifactName: ${name}-${version}-${arch}.${ext}
+  executableName: srvmngr
+  synopsis: Gestionnaire de serveurs Linux par SSH
+  description: Panneau de contrôle multi-serveurs avec SSH, Docker, systemd et nginx
+  desktop:
+    entryName: SRV Mngr
+    StartupWMClass: srvmngr
+publish:
+  provider: github
+  owner: nexos20lv
+  repo: SRVMngr
+  releaseType: release

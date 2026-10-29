@@ -21,6 +21,7 @@ interface FormState {
   notes: string
   privateKey: string
   passphrase: string
+  hostFingerprint: string
 }
 
 const empty: FormState = {
@@ -33,7 +34,8 @@ const empty: FormState = {
   group: '',
   notes: '',
   privateKey: '',
-  passphrase: ''
+  passphrase: '',
+  hostFingerprint: ''
 }
 
 export function HostDialog({ open, host, onClose, onSaved }: Props): ReactNode {
@@ -60,7 +62,8 @@ export function HostDialog({ open, host, onClose, onSaved }: Props): ReactNode {
             group: host.group ?? '',
             notes: host.notes ?? '',
             privateKey: '',
-            passphrase: ''
+            passphrase: '',
+            hostFingerprint: host.hostFingerprint ?? ''
           }
         : empty
     )
@@ -75,7 +78,8 @@ export function HostDialog({ open, host, onClose, onSaved }: Props): ReactNode {
       port: Number(form.port) || 22,
       username: form.username.trim(),
       group: form.group.trim() || undefined,
-      notes: form.notes.trim() || undefined
+      notes: form.notes.trim() || undefined,
+      hostFingerprint: form.hostFingerprint.trim() || undefined
     }
     if (form.password) data.password = form.password
     if (form.sudoPassword) data.sudoPassword = form.sudoPassword
@@ -112,9 +116,14 @@ export function HostDialog({ open, host, onClose, onSaved }: Props): ReactNode {
         username: form.username.trim(),
         password: form.password || undefined,
         privateKey: advanced ? form.privateKey || undefined : undefined,
-        passphrase: advanced ? form.passphrase || undefined : undefined
+        passphrase: advanced ? form.passphrase || undefined : undefined,
+        hostFingerprint: form.hostFingerprint.trim() || undefined
       })
       if (res.ok) notify(`Connexion réussie en ${res.latencyMs} ms`, 'ok')
+      else if (res.fingerprint) {
+        set('hostFingerprint', res.fingerprint)
+        notify(`Empreinte détectée : ${res.fingerprint}. Enregistre pour l'approuver.`, 'ok')
+      }
       else notify(`Échec : ${res.error}`, 'err')
     } catch (err) {
       notify(err instanceof Error ? err.message : String(err), 'err')
@@ -233,6 +242,30 @@ export function HostDialog({ open, host, onClose, onSaved }: Props): ReactNode {
           </div>
         </>
       )}
+
+      <div className="field">
+        <div className="row row--between">
+          <label>Empreinte de clé hôte SSH</label>
+          <Btn variant="ghost" size="sm" onClick={async () => {
+            try {
+              const result = await window.srv.hosts.importKnownHosts()
+              notify(`${result.imported} empreinte(s) importée(s) depuis known_hosts`, result.imported ? 'ok' : 'info')
+            } catch (err) {
+              notify(err instanceof Error ? err.message : String(err), 'err')
+            }
+          }}>
+            Importer known_hosts
+          </Btn>
+        </div>
+        <input
+          className="input"
+          value={form.hostFingerprint}
+          onChange={(e) => set('hostFingerprint', e.target.value)}
+          placeholder="SHA256:... (Tester puis Enregistrer)"
+          autoComplete="off"
+        />
+        <span className="hint">Si vide, la première connexion approuve l'empreinte reçue (TOFU), puis les changements sont refusés.</span>
+      </div>
 
       <div className="field-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
         <div className="field">

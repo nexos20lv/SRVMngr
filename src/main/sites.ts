@@ -218,12 +218,18 @@ export class SitesManager {
     await this.ssh.exec(id, `cp -p ${shQuote(path)} ${shQuote(backup)}`, { sudo: true, timeoutMs: 20_000 })
     await this.remote.writeFile(id, path, content, true)
     const result = await this.testAndReload(id)
+    if (!result.ok) {
+      await this.ssh.exec(id, `cp -p ${shQuote(backup)} ${shQuote(path)}`, { sudo: true, timeoutMs: 20_000 })
+      await this.testAndReload(id)
+    }
     return { ok: result.ok, test: result.test, backup }
   }
 
   async restore(id: string, name: string, backup: string): Promise<SiteActionResult> {
     const path = await this.resolvePath(id, name)
-    if (!backup.startsWith('/etc/nginx/')) throw new Error('Sauvegarde invalide')
+    if (!/^\/etc\/nginx\/(?:sites-(?:available|enabled)\/)[a-zA-Z0-9._ -]+\.bak-\d+$/.test(backup)) {
+      throw new Error('Sauvegarde invalide')
+    }
     await this.ssh.exec(id, `cp -p ${shQuote(backup)} ${shQuote(path)}`, { sudo: true, timeoutMs: 20_000 })
     const result = await this.testAndReload(id)
     return { ok: result.ok, test: result.test }

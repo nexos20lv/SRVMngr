@@ -27,7 +27,18 @@ const api: SrvApi = {
   hosts: {
     list: () => invoke('hosts:list'),
     save: (host) => invoke('hosts:save', host),
+    importKnownHosts: () => invoke('hosts:import-known-hosts'),
     remove: (id) => invoke('hosts:remove', id)
+  },
+  sync: {
+    session: () => invoke('sync:session'),
+    register: (url, email, password) => invoke('sync:register', url, email, password),
+    login: (url, email, password) => invoke('sync:login', url, email, password),
+    changePassword: (password, newPassword) => invoke('sync:change-password', password, newPassword),
+    logout: () => invoke('sync:logout'),
+    auto: () => invoke('sync:auto'),
+    push: (url, token, password) => invoke('sync:push', url, token, password),
+    pull: (url, token, password) => invoke('sync:pull', url, token, password)
   },
   ssh: {
     connect: (id) => invoke('ssh:connect', id),
@@ -39,6 +50,8 @@ const api: SrvApi = {
   },
   metrics: {
     start: (id) => invoke('metrics:start', id),
+    refresh: (id) => invoke('metrics:refresh', id),
+    history: (id) => invoke('metrics:history', id),
     stop: (id) => invoke('metrics:stop', id),
     onUpdate: (cb) => subscribe(['metrics:update', cb as never]),
     onError: (cb) => subscribe(['metrics:error', cb as never])
@@ -47,6 +60,8 @@ const api: SrvApi = {
   services: {
     list: (id) => invoke('services:list', id),
     action: (id, unit, action) => invoke('services:action', id, unit, action),
+    actionMany: (ids, unit, action) => invoke('services:action-many', ids, unit, action),
+    updateMany: (ids) => invoke('system:update-many', ids),
     journal: (id, unit, lines = 300) => invoke('services:journal', id, unit, lines)
   },
   docker: {
@@ -122,7 +137,13 @@ const api: SrvApi = {
     onData: (cb) => subscribe(['term:data', cb as never]),
     onClose: (cb) => subscribe(['term:close', cb as never])
   },
-  onStatus: (cb) => subscribe(['ssh:status', cb as never])
+  onStatus: (cb) => subscribe(['ssh:status', cb as never]),
+  audit: {
+    list: () => invoke('audit:list')
+  },
+  updater: {
+    onStatus: (cb) => subscribe(['updater:status', cb as never])
+  }
 }
 
 contextBridge.exposeInMainWorld('srv', api)
