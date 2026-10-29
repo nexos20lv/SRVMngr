@@ -46,9 +46,11 @@ function Shell(): React.ReactNode {
       const saved = await Promise.all(list.map(async (host) => [host.id, await window.srv.metrics.history(host.id)] as const))
       setHistory((prev) => ({ ...prev, ...Object.fromEntries(saved) }))
       if (!connectNew) return
-      for (const host of list) {
-        if (statusesRef.current[host.id]?.status !== 'online') await connectHost(host)
-      }
+      await Promise.all(
+        list
+          .filter((host) => statusesRef.current[host.id]?.status !== 'online')
+          .map((host) => connectHost(host))
+      )
     },
     [connectHost]
   )
