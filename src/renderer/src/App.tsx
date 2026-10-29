@@ -8,6 +8,7 @@ import { HostView } from '@/views/HostView'
 import { Alerts } from '@/views/Alerts'
 import { Sync } from '@/views/Sync'
 import { Activity } from '@/views/Activity'
+import { Scripts } from '@/views/Scripts'
 
 const HISTORY_SIZE = 60
 const SYNC_INTERVAL_MS = 30_000
@@ -207,7 +208,7 @@ function Shell(): React.ReactNode {
   useEffect(() => window.srv.updater.onStatus(setUpdate), [])
 
   useEffect(() => {
-    if (!['fleet', 'alerts', 'activity', 'sync'].includes(activeId) && !hosts.some((h) => h.id === activeId)) setActiveId('fleet')
+    if (!['fleet', 'alerts', 'activity', 'scripts', 'sync'].includes(activeId) && !hosts.some((h) => h.id === activeId)) setActiveId('fleet')
   }, [hosts, activeId])
 
   const activeHost = hosts.find((h) => h.id === activeId)
@@ -224,6 +225,7 @@ function Shell(): React.ReactNode {
         onEdit={(host) => setDialog({ open: true, host })}
         onAlerts={() => setActiveId('alerts')}
         onActivity={() => setActiveId('activity')}
+        onScripts={() => setActiveId('scripts')}
         onSync={() => setActiveId('sync')}
         syncEmail={syncEmail}
       />}
@@ -241,6 +243,8 @@ function Shell(): React.ReactNode {
           <Alerts hosts={hosts} statuses={statuses} metrics={metrics} onOpen={setActiveId} />
         ) : activeId === 'activity' ? (
           <Activity hosts={hosts} />
+        ) : activeId === 'scripts' ? (
+          <Scripts hosts={hosts} />
         ) : activeId === 'sync' ? (
           <Sync onClose={() => setActiveId('fleet')} onSessionChange={setSyncEmail} />
         ) : activeHost ? (

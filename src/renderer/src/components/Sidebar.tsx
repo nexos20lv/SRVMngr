@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, Boxes, ClipboardList, LogIn, Plus, Server } from 'lucide-react'
+import { AlertTriangle, Boxes, ClipboardList, FileCode2, LogIn, Plus, Server } from 'lucide-react'
 import type { HostPublic, HostStatus, MetricsSnapshot } from '@shared/types'
 import { clamp } from '@/lib/hooks'
 
@@ -13,11 +13,12 @@ interface Props {
   onEdit: (host: HostPublic) => void
   onAlerts: () => void
   onActivity: () => void
+  onScripts: () => void
   onSync: () => void
   syncEmail?: string
 }
 
-export function Sidebar({ hosts, statuses, metrics, active, onSelect, onAdd, onEdit, onAlerts, onActivity, onSync, syncEmail }: Props): ReactNode {
+export function Sidebar({ hosts, statuses, metrics, active, onSelect, onAdd, onEdit, onAlerts, onActivity, onScripts, onSync, syncEmail }: Props): ReactNode {
   const online = hosts.filter((h) => statuses[h.id]?.status === 'online').length
 
   return (
@@ -45,6 +46,10 @@ export function Sidebar({ hosts, statuses, metrics, active, onSelect, onAdd, onE
         <button className={`nav-item ${active === 'activity' ? 'nav-item--active' : ''}`} onClick={onActivity}>
           <ClipboardList size={15} />
           <span className="nav-item__label">Activité</span>
+        </button>
+        <button className={`nav-item ${active === 'scripts' ? 'nav-item--active' : ''}`} onClick={onScripts}>
+          <FileCode2 size={15} />
+          <span className="nav-item__label">Scripts</span>
         </button>
         <div className="sidebar__label">
           <span>Serveurs</span>
