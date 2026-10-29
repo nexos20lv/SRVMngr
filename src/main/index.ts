@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
@@ -90,7 +90,8 @@ function createWindow(): void {
     show: false,
     backgroundColor: '#0a0d13',
     title: 'SRV Mngr',
-    titleBarStyle: isMac ? 'hiddenInset' : 'default',
+    autoHideMenuBar: true,
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     ...(isMac ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -100,6 +101,8 @@ function createWindow(): void {
       spellcheck: false
     }
   })
+
+  mainWindow.setMenuBarVisibility(false)
 
   mainWindow.on('ready-to-show', () => {
     if (updateFinished || !app.isPackaged) mainWindow?.show()
@@ -176,6 +179,7 @@ function startAutoUpdater(): void {
 }
 
 app.setName('SRV Mngr')
+Menu.setApplicationMenu(null)
 if (process.platform === 'win32') app.setAppUserModelId('in.nxslab.srvmngr')
 
 app.whenReady().then(async () => {

@@ -58,6 +58,11 @@ function Shell(): React.ReactNode {
       setHosts(list)
       const saved = await Promise.all(list.map(async (host) => [host.id, await window.srv.metrics.history(host.id)] as const))
       setHistory((prev) => ({ ...prev, ...Object.fromEntries(saved) }))
+      const backendStatuses = await window.srv.ssh.statuses()
+      setStatuses((prev) => ({
+        ...prev,
+        ...Object.fromEntries(backendStatuses.map((status) => [status.id, status]))
+      }))
       if (!connectNew) return
       const connectAtStartup = async (host: HostPublic): Promise<void> => {
         for (let attempt = 1; attempt <= STARTUP_CONNECT_ATTEMPTS; attempt += 1) {
@@ -69,7 +74,7 @@ function Shell(): React.ReactNode {
       }
       await Promise.all(
         list
-          .filter((host) => statusesRef.current[host.id]?.status !== 'online')
+          .filter((host) => !backendStatuses.some((status) => status.id === host.id && status.status === 'online'))
           .map((host) => connectAtStartup(host))
       )
       const currentStatuses = await window.srv.ssh.statuses()
@@ -87,12 +92,25 @@ function Shell(): React.ReactNode {
 
   useEffect(() => {
     if (!booted || hosts.length === 0) return
+    const reconcileStatuses = async (): Promise<void> => {
+      try {
+        const currentStatuses = await window.srv.ssh.statuses()
+        setStatuses((prev) => ({
+          ...prev,
+          ...Object.fromEntries(currentStatuses.map((status) => [status.id, status]))
+        }))
+      } catch (err) {
+        console.error('[ssh] synchronisation des statuts impossible:', err)
+      }
+    }
+    void reconcileStatuses()
     const timer = window.setInterval(() => {
       const offlineHosts = hosts.filter((host) => {
         const status = statusesRef.current[host.id]?.status
         return status === undefined || status === 'offline' || status === 'error'
       })
       void Promise.all(offlineHosts.map((host) => connectHost(host)))
+      void reconcileStatuses()
     }, 15_000)
     return () => window.clearInterval(timer)
   }, [booted, connectHost, hosts])
