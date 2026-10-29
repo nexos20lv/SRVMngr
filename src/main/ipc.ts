@@ -414,4 +414,22 @@ export async function registerIpc({
     ssh.closeShell(termId)
     return true
   })
+
+  const connectAtStartup = async (host: HostConfig): Promise<void> => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await ssh.connect(host.id, true)
+        metrics.start(host.id)
+        return
+      } catch (err) {
+        if (attempt === 3) {
+          console.error(`[startup] connexion SSH impossible pour ${host.name}:`, err instanceof Error ? err.message : String(err))
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1_500))
+      }
+    }
+  }
+
+  void Promise.all(hosts.map((host) => connectAtStartup(host)))
 }
